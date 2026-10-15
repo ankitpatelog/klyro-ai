@@ -1,0 +1,14 @@
+fastapi
+dotenv
+uvicorn
+sqlalchemy
+pydantic-settings
+psycopg[binary]
+pwdlib
+pwdlib[argon2]
+pydantic
+sqlalchemy[asyncio]
+PyJWT
+email-validator
+redis[hiredis]
+
