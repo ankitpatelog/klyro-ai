@@ -21,7 +21,7 @@ def token_hash(token: str) -> str:
     """Return a non-reversible value safe to persist in Redis."""
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
-
+# create access token
 def create_access_token(user_id: str, session_id: str) -> str:
     """Create a short-lived token used to access protected API endpoints."""
     from app.core.config import settings
@@ -37,6 +37,7 @@ def create_access_token(user_id: str, session_id: str) -> str:
     return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
 
 
+# create refresh token
 def create_refresh_token(user_id: str) -> tuple[str, str, datetime]:
     """Create a refresh JWT and return its ID and expiry for server-side revocation."""
     from app.core.config import settings
@@ -55,7 +56,9 @@ def create_refresh_token(user_id: str) -> tuple[str, str, datetime]:
     return token, token_id, expires_at
 
 
+# take refrsh token and verrigy whether its valid or not 
 def decode_token(token: str, expected_type: str) -> dict:
+    """Decode a JWT, verify its type, and check for required claims. Raises HTTP 401 if invalid."""
     from app.core.config import settings
 
     try:

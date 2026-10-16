@@ -1,7 +1,8 @@
 from redis.asyncio import Redis
 
-
+# use to form the key used in stroing inside the redis
 def _session_key(session_id: str) -> str:
+    """ generate key to use inside the redis to store key values pair"""
     return f"auth:session:{session_id}"
 
 
@@ -28,6 +29,7 @@ async def is_access_token_active(redis: Redis, session_id: str, user_id: str, ac
     return session.get("user_id") == user_id and session.get("access_hash") == access_hash
 
 
+# store new access +refresh tokne inside the redis by blocking the user interface so no other changes occur at the time of rotation of tokens
 async def rotate_session(
     redis: Redis,
     *,

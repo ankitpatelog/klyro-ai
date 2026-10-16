@@ -20,7 +20,7 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 bearer_scheme = HTTPBearer(auto_error=False)
 
-
+# set both token in the cookies in the / path ie main landing page
 def _set_auth_cookies(response: Response, access_token: str, refresh_token: str) -> None:
     cookie_options = {
         "httponly": True,
@@ -44,6 +44,7 @@ async def _active_user(db: AsyncSession, user_id: str) -> User:
     return user
 
 
+# used inside the protected route to check the available access token is valid or not for the current user
 async def get_current_user(
     request: Request,
     response: Response,
@@ -68,6 +69,7 @@ async def get_current_user(
             pass
 
     refresh_token = request.cookies.get("refresh_token")
+    
     if not refresh_token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
     try:
@@ -102,6 +104,11 @@ async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
 
 @router.post("/login", response_model=TokenResponse)
 async def login(req: LoginRequest, response: Response, db: AsyncSession = Depends(get_db), redis: Redis = Depends(get_redis)):
+    """
+    Authenticate a user with email and password credentials. 
+    If successful, issues new access and refresh tokens, sets them in cookies, and returns them in the response.
+    Raises HTTP 401 if authentication fails.
+    """
     try:
         access_token, refresh_token = await login_user(db, redis, req.email, req.password)
         _set_auth_cookies(response, access_token, refresh_token)
@@ -110,8 +117,37 @@ async def login(req: LoginRequest, response: Response, db: AsyncSession = Depend
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
 
 
+# generate refresh + access token when the access toekn is expired so it rotated the whole token and store new token inside the redis andd the server cookie
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh(req: RefreshRequest, request: Request, response: Response, db: AsyncSession = Depends(get_db), redis: Redis = Depends(get_redis)):
+async def refresh(
+    req: RefreshRequest,
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    """
+    Refresh an expired or soon-to-expire access token using a valid refresh token.
+
+    This endpoint allows clients to obtain new access and refresh tokens by presenting
+    a valid refresh token (provided in the request body or cookies).
+    On success, new tokens are set in cookies and returned in the response.
+    If the refresh token is invalid, revoked, or expired, clears any authentication cookies
+    and returns HTTP 401 Unauthorized.
+
+    Args:
+        req (RefreshRequest): The request body with an optional refresh token.
+        request (Request): The incoming HTTP request, potentially carrying cookies.
+        response (Response): The HTTP response object to modify cookies.
+        db (AsyncSession): Database session dependency.
+        redis (Redis): Redis connection dependency.
+
+    Returns:
+        TokenResponse: The new access and refresh tokens.
+
+    Raises:
+        HTTPException: 401 if the refresh token is missing, invalid, or expired.
+    """
     refresh_token = req.refresh_token or request.cookies.get("refresh_token")
     if not refresh_token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token is required")
@@ -123,7 +159,8 @@ async def refresh(req: RefreshRequest, request: Request, response: Response, db:
         _clear_auth_cookies(response)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired refresh token") from exc
 
-
+   
+# logout
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
 async def logout(req: RefreshRequest, request: Request, response: Response, redis: Redis = Depends(get_redis)):
     refresh_token = req.refresh_token or request.cookies.get("refresh_token")
@@ -134,7 +171,7 @@ async def logout(req: RefreshRequest, request: Request, response: Response, redi
             pass
     _clear_auth_cookies(response)
 
-
+# protected route -> validate user identity using jwt and return the vlaid user response
 @router.get("/me", response_model=RegisterResponse)
 async def me(current_user: User = Depends(get_current_user)):
     return RegisterResponse(

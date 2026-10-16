@@ -8,6 +8,7 @@ from app.repositories.users import get_user_by_email, get_user_by_id, create_use
 from app.core.security import create_access_token, create_refresh_token, decode_token, hash_password, token_hash, verify_password
 from app.repositories.token_sessions import create_session, delete_session_if_refresh_matches, rotate_session
 
+# register user
 async def register_user(db: AsyncSession, email: str, full_name: str, password: str) -> User:
     """
     Registers a new user with the provided email, full name, and password.
@@ -37,12 +38,34 @@ async def register_user(db: AsyncSession, email: str, full_name: str, password: 
     except Exception as e:
         raise RuntimeError(f"Failed to create user: {e}")
 
-
+# login
 async def login_user(db: AsyncSession, redis: Redis, email: str, password: str) -> tuple[str, str]:
     user = await get_user_by_email(db, email.strip().lower())
     if not user or not user.is_active or not verify_password(password, user.password_hash):
         raise ValueError("Invalid email or password")
     return await _issue_tokens(redis, str(user.id))
+
+
+# generate both access + refresh token 
+async def _issue_tokens(redis: Redis, user_id: str) -> tuple[str, str]:
+    access_token, refresh_token, session_id, expires_at = _new_token_pair(user_id)
+    ttl = max(1, int((expires_at - datetime.now(UTC)).total_seconds()))
+    await create_session(
+        redis,
+        session_id=session_id,
+        user_id=user_id,
+        access_hash=token_hash(access_token),
+        refresh_hash=token_hash(refresh_token),
+        expires_in_seconds=ttl,
+    )
+    return access_token, refresh_token
+
+
+# return both token pair
+def _new_token_pair(user_id: str) -> tuple[str, str, str, datetime]:
+    refresh_token, session_id, expires_at = create_refresh_token(user_id)
+    return create_access_token(user_id, session_id), refresh_token, session_id, expires_at
+
 
 
 async def refresh_user_tokens(db: AsyncSession, redis: Redis, refresh_token: str) -> tuple[str, str]:
@@ -76,20 +99,5 @@ async def logout_user(redis: Redis, refresh_token: str) -> None:
         raise ValueError("Refresh token is invalid or has already been revoked")
 
 
-def _new_token_pair(user_id: str) -> tuple[str, str, str, datetime]:
-    refresh_token, session_id, expires_at = create_refresh_token(user_id)
-    return create_access_token(user_id, session_id), refresh_token, session_id, expires_at
 
 
-async def _issue_tokens(redis: Redis, user_id: str) -> tuple[str, str]:
-    access_token, refresh_token, session_id, expires_at = _new_token_pair(user_id)
-    ttl = max(1, int((expires_at - datetime.now(UTC)).total_seconds()))
-    await create_session(
-        redis,
-        session_id=session_id,
-        user_id=user_id,
-        access_hash=token_hash(access_token),
-        refresh_hash=token_hash(refresh_token),
-        expires_in_seconds=ttl,
-    )
-    return access_token, refresh_token
