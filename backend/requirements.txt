@@ -11,4 +11,7 @@ sqlalchemy[asyncio]
 PyJWT
 email-validator
 redis[hiredis]
+httpx
+python-multipart
+pypdf
 
