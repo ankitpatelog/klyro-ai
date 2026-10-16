@@ -41,3 +41,16 @@ app.include_router(api_router)
 @app.get("/test")
 async def test():
     return {"message": "Test endpoint is working"}
+
+
+
+
+
+
+# Start server
+#   → validate JWT secret
+#   → connect and test Redis
+#   → save Redis client on app.state
+#   → yield: serve API requests
+# Stop server
+#   → close Redis connection
