@@ -1,5 +1,7 @@
 from typing import Literal
+from urllib.parse import urlparse
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -24,6 +26,35 @@ class Settings(BaseSettings):
     EMBEDDING_API_KEY: str = ""
     EMBEDDING_MODEL: str = "text-embedding-3-small"
     EMBEDDING_DIMENSIONS: int = 1536
+    # Groq is OpenAI-compatible; GENERATION_* keeps a provider swap possible later.
+    GROQ_API_KEY: str = ""
+    GENERATION_API_URL: str = "https://api.groq.com/openai/v1"
+    GENERATION_API_KEY: str = ""
+    GENERATION_MODEL: str = "llama-3.3-70b-versatile"
+    RAG_RETRIEVAL_LIMIT: int = 24
+    RAG_RERANK_LIMIT: int = 8
+    RAG_MAX_CONTEXT_CHARS: int = 12_000
+    RAG_USER_REQUESTS_PER_MINUTE: int = 10
+    RAG_GENERATION_MAX_RETRIES: int = 2
+    RAG_CIRCUIT_BREAKER_SECONDS: int = 30
+
+    @field_validator("DATABASE_URL", mode="after")
+    @classmethod
+    def use_async_psycopg_driver(cls, value: str) -> str:
+        if value.startswith("postgresql://"):
+            return f"postgresql+psycopg://{value.removeprefix('postgresql://')}"
+        return value
+
+    @field_validator("SUPABASE_URL", mode="after")
+    @classmethod
+    def normalize_supabase_project_url(cls, value: str) -> str:
+        """Accept either a Supabase project URL or its database connection URL."""
+        value = value.strip().rstrip("/")
+        if value.startswith(("postgresql://", "postgres://")):
+            host = urlparse(value).hostname or ""
+            if host.startswith("db.") and host.endswith(".supabase.co"):
+                return f"https://{host.removeprefix('db.')}"
+        return value
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

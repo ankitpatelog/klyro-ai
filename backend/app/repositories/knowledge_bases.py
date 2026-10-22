@@ -40,7 +40,8 @@ async def create_knowledge_base(
 async def list_knowledge_bases(db: AsyncSession, user_id: uuid.UUID) -> list[Knowledgebase]:
     result = await db.execute(
         text(f"""
-            SELECT {_FIELDS}
+            SELECT {_FIELDS},
+                (SELECT COUNT(*) FROM documents WHERE documents.knowledge_base_id = knowledgebases.id) AS document_count
             FROM knowledgebases
             WHERE user_id = :user_id
             ORDER BY created_at DESC
@@ -55,7 +56,8 @@ async def get_knowledge_base(
 ) -> Knowledgebase | None:
     result = await db.execute(
         text(f"""
-            SELECT {_FIELDS}
+            SELECT {_FIELDS},
+                (SELECT COUNT(*) FROM documents WHERE documents.knowledge_base_id = knowledgebases.id) AS document_count
             FROM knowledgebases
             WHERE id = :id AND user_id = :user_id
         """),

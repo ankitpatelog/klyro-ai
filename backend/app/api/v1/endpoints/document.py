@@ -13,13 +13,25 @@ from app.core.config import settings
 from app.core.redis import get_redis
 from app.db.session import get_db
 from app.models.user import User
-from app.repositories.document import MAX_FILE_SIZE, create_document_and_job, validate_document
+from app.repositories.document import MAX_FILE_SIZE, create_document_and_job, delete_document, validate_document
 from app.repositories.knowledge_bases import get_knowledge_base
 from app.schemas.document import DocumentResponse
 
 
 router = APIRouter()
+knowledge_base_router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _supabase_headers(*, content_type: str | None = None) -> dict[str, str]:
+    """Support both modern ``sb_secret_*`` keys and legacy JWT service keys."""
+    api_key = settings.SUPABASE_SERVICE_ROLE_KEY
+    headers = {"apikey": api_key}
+    if not api_key.startswith("sb_"):
+        headers["Authorization"] = f"Bearer {api_key}"
+    if content_type:
+        headers["Content-Type"] = content_type
+    return headers
 
 
 def _storage_path(user_id: uuid.UUID, knowledge_base_id: uuid.UUID, document_id: uuid.UUID, filename: str) -> str:
@@ -30,17 +42,22 @@ def _storage_path(user_id: uuid.UUID, knowledge_base_id: uuid.UUID, document_id:
 async def _upload_to_supabase(storage_path: str, content: bytes, mime_type: str) -> None:
     # httpx help to make the request witout blocking the main request without breaking the application
     url = f"{settings.SUPABASE_URL.rstrip('/')}/storage/v1/object/{settings.SUPABASE_STORAGE_BUCKET}/{storage_path}"
-    headers = {
-        "apikey": settings.SUPABASE_SERVICE_ROLE_KEY,
-        "Authorization": f"Bearer {settings.SUPABASE_SERVICE_ROLE_KEY}",
-        "Content-Type": mime_type or "application/octet-stream",
-        "x-upsert": "false",
-    }
+    headers = _supabase_headers(content_type=mime_type or "application/octet-stream")
+    headers["x-upsert"] = "false"
     async with httpx.AsyncClient(timeout=60) as client:
         response = await client.post(url, content=content, headers=headers)
     if response.is_error:
         logger.error("Supabase upload failed: status=%s body=%s", response.status_code, response.text[:500])
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="File storage upload failed")
+
+
+async def _delete_from_supabase(storage_path: str) -> None:
+    url = f"{settings.SUPABASE_URL.rstrip('/')}/storage/v1/object/{settings.SUPABASE_STORAGE_BUCKET}/{storage_path}"
+    headers = _supabase_headers()
+    async with httpx.AsyncClient(timeout=60) as client:
+        response = await client.delete(url, headers=headers)
+    if response.is_error and response.status_code != status.HTTP_404_NOT_FOUND:
+        logger.error("Supabase delete failed: status=%s body=%s", response.status_code, response.text[:500])
 
 
 @router.post("/upload", response_model=DocumentResponse, status_code=status.HTTP_201_CREATED)
@@ -102,3 +119,41 @@ async def upload_document(
         logger.exception("Document %s is queued but Redis notification failed", document_id)
 
     return document
+
+
+@knowledge_base_router.post(
+    "/knowledgebase/{knowledge_base_id}/documents",
+    response_model=DocumentResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_knowledge_base_document(
+    knowledge_base_id: uuid.UUID,
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
+):
+    """Compatibility endpoint for the knowledge-base detail page upload form."""
+    return await upload_document(
+        knowledge_base_id=knowledge_base_id,
+        file=file,
+        current_user=current_user,
+        db=db,
+        redis=redis,
+    )
+
+
+@knowledge_base_router.delete(
+    "/knowledgebase/{knowledge_base_id}/documents/{document_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_knowledge_base_document(
+    knowledge_base_id: uuid.UUID,
+    document_id: uuid.UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    storage_path = await delete_document(db, document_id, knowledge_base_id, current_user.id)
+    if storage_path is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+    await _delete_from_supabase(storage_path)

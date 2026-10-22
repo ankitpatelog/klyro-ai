@@ -10,5 +10,6 @@ class Knowledgebase(BaseModel):
     status : str
     document_limit : int 
     created_at : datetime
+    document_count: int = 0
 
 

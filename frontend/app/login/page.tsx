@@ -14,7 +14,7 @@ export default function LoginPage() {
   const [form, setForm] = useState({ email: "", password: "" });
 
   useEffect(() => {
-    toast.success("Welcome back — sign in to continue.");
+    toast.success("Sign in to continue.");
   }, []);
 
   async function handleLogin() {

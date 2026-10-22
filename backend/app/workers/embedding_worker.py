@@ -15,6 +15,7 @@ import asyncio
 import io
 import json
 import logging
+import sys
 import uuid
 from collections.abc import Sequence
 
@@ -34,6 +35,14 @@ STATUS_CHANNEL = "document:status"
 CHUNK_SIZE = 3_200
 CHUNK_OVERLAP = 400
 EMBEDDING_BATCH_SIZE = 64
+
+
+def _supabase_headers() -> dict[str, str]:
+    api_key = settings.SUPABASE_SERVICE_ROLE_KEY
+    headers = {"apikey": api_key}
+    if not api_key.startswith("sb_"):
+        headers["Authorization"] = f"Bearer {api_key}"
+    return headers
 
 
 def _require_settings() -> None:
@@ -84,7 +93,7 @@ async def _publish(redis, document_id: str, status_value: str, progress: int, **
 
 async def _download_file(storage_path: str) -> bytes:
     url = f"{settings.SUPABASE_URL.rstrip('/')}/storage/v1/object/{settings.SUPABASE_STORAGE_BUCKET}/{storage_path}"
-    headers = {"apikey": settings.SUPABASE_SERVICE_ROLE_KEY, "Authorization": f"Bearer {settings.SUPABASE_SERVICE_ROLE_KEY}"}
+    headers = _supabase_headers()
     async with httpx.AsyncClient(timeout=90) as client:
         response = await client.get(url, headers=headers)
         response.raise_for_status()
@@ -161,7 +170,7 @@ async def _finish(document_id: str, error: str | None = None) -> None:
         """), {"document_id": document_id, "status": status_value, "error": error})
         await db.execute(text("""
             UPDATE embedding_jobs SET status = :status, progress = :progress, error_message = :error,
-                completed_at = CASE WHEN :status = 'completed' THEN NOW() ELSE NULL END, updated_at = NOW()
+                completed_at = CASE WHEN CAST(:status AS VARCHAR(20)) = 'completed' THEN NOW() ELSE NULL END, updated_at = NOW()
             WHERE document_id = :document_id
         """), {"document_id": document_id, "status": status_value, "progress": 100 if not error else 0, "error": error})
         await db.commit()
@@ -242,4 +251,6 @@ async def main() -> None:
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    if sys.platform == "win32":
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     asyncio.run(main())

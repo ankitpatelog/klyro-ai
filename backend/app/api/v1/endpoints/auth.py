@@ -28,7 +28,7 @@ def _set_auth_cookies(response: Response, access_token: str, refresh_token: str)
         "samesite": settings.COOKIE_SAMESITE,
         "path": "/",
     }
-    response.set_cookie("access_token", access_token, max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60, **cookie_options)
+    response.set_cookie("access_token", access_token, max_age=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 24 * 60 * 60, **cookie_options)
     response.set_cookie("refresh_token", refresh_token, max_age=settings.REFRESH_TOKEN_EXPIRE_DAYS * 24 * 60 * 60, **cookie_options)
 
 

@@ -95,3 +95,58 @@ async def create_document_and_job(
     )
     await db.commit()
     return document
+
+
+async def list_documents_for_knowledge_base(
+    db: AsyncSession, knowledge_base_id: uuid.UUID, user_id: uuid.UUID
+) -> list[Mapping[str, object]]:
+    result = await db.execute(
+        text(f"""
+            SELECT {_FIELDS}
+            FROM documents
+            WHERE knowledge_base_id = :knowledge_base_id AND user_id = :user_id
+            ORDER BY created_at DESC
+        """),
+        {"knowledge_base_id": str(knowledge_base_id), "user_id": str(user_id)},
+    )
+    return list(result.mappings().all())
+
+
+async def completed_document_count(
+    db: AsyncSession, knowledge_base_id: uuid.UUID, user_id: uuid.UUID
+) -> int:
+    """Count only documents whose vectors are ready for grounded RAG retrieval."""
+    result = await db.execute(
+        text("""
+            SELECT COUNT(*)
+            FROM documents
+            WHERE knowledge_base_id = :knowledge_base_id
+              AND user_id = :user_id
+              AND status = 'completed'
+        """),
+        {"knowledge_base_id": str(knowledge_base_id), "user_id": str(user_id)},
+    )
+    return int(result.scalar_one())
+
+
+async def delete_document(
+    db: AsyncSession, document_id: uuid.UUID, knowledge_base_id: uuid.UUID, user_id: uuid.UUID
+) -> str | None:
+    result = await db.execute(
+        text("""
+            DELETE FROM documents
+            WHERE id = :document_id
+              AND knowledge_base_id = :knowledge_base_id
+              AND user_id = :user_id
+            RETURNING storage_path
+        """),
+        {
+            "document_id": str(document_id),
+            "knowledge_base_id": str(knowledge_base_id),
+            "user_id": str(user_id),
+        },
+    )
+    storage_path = result.scalar_one_or_none()
+    if storage_path is not None:
+        await db.commit()
+    return storage_path

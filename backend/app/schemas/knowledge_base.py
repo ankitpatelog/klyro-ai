@@ -3,6 +3,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.schemas.document import DocumentResponse
+
 
 class KnowledgeBaseCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=120)
@@ -54,3 +56,8 @@ class KnowledgeBaseResponse(BaseModel):
     status: str
     document_limit: int
     created_at: datetime
+    document_count: int = 0
+
+
+class KnowledgeBaseDetailResponse(KnowledgeBaseResponse):
+    documents: list[DocumentResponse] = Field(default_factory=list)
