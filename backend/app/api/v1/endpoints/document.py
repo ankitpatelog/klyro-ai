@@ -24,10 +24,14 @@ logger = logging.getLogger(__name__)
 
 
 def _supabase_headers(*, content_type: str | None = None) -> dict[str, str]:
-    """Support both modern ``sb_secret_*`` keys and legacy JWT service keys."""
-    api_key = settings.SUPABASE_SERVICE_ROLE_KEY
+    """Build Supabase storage headers.
+
+    Modern ``sb_secret_*`` API keys are not JWTs, so they must only be sent in
+    ``apikey``. Legacy service-role JWTs also require the Bearer header.
+    """
+    api_key = settings.SUPABASE_SERVICE_ROLE_KEY.strip()
     headers = {"apikey": api_key}
-    if not api_key.startswith("sb_"):
+    if api_key.count(".") == 2:
         headers["Authorization"] = f"Bearer {api_key}"
     if content_type:
         headers["Content-Type"] = content_type

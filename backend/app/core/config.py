@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str = ""
     GENERATION_API_URL: str = "https://api.groq.com/openai/v1"
     GENERATION_API_KEY: str = ""
-    GENERATION_MODEL: str = "llama-3.3-70b-versatile"
+    GENERATION_MODEL: str = "openai/gpt-oss-20b"
     RAG_RETRIEVAL_LIMIT: int = 24
     RAG_RERANK_LIMIT: int = 8
     RAG_MAX_CONTEXT_CHARS: int = 12_000

@@ -14,7 +14,7 @@ from app.core.config import settings
 from app.services.rag.retrieval import rerank, retrieve_hybrid
 
 SYSTEM_PROMPT = """You are a careful knowledge-base assistant. Answer only from the supplied evidence.
-If evidence is insufficient, say so plainly. Cite evidence inline using [chunk:<id>]. Do not invent citations."""
+If evidence is insufficient, say so plainly. Use concise Markdown: headings when useful, bullets for lists, and **bold** for key terms. Cite evidence inline using [chunk:<id>]. Do not invent citations."""
 ANSWER_PROMPT = ChatPromptTemplate.from_messages([
     ("system", SYSTEM_PROMPT),
     ("human", "Question: {question}\n\nEvidence:\n{evidence}"),
@@ -66,7 +66,7 @@ async def retrieve(state: RagState) -> None:
 
 def evidence_checker(state: RagState) -> bool:
     state.evidence = rerank(state.rewritten_query, state.candidates)
-    if not state.evidence or state.evidence[0].get("rerank_score", 0) < 0.02:
+    if not state.evidence:
         return False
     used, chars = [], 0
     for evidence in state.evidence:

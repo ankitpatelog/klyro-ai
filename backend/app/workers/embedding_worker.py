@@ -32,15 +32,15 @@ from app.db.session import SessionLocal
 logger = logging.getLogger(__name__)
 QUEUE_NAME = "embedding:jobs"
 STATUS_CHANNEL = "document:status"
-CHUNK_SIZE = 3_200
-CHUNK_OVERLAP = 400
+CHUNK_SIZE = 1_000
+CHUNK_OVERLAP = 150
 EMBEDDING_BATCH_SIZE = 64
 
 
 def _supabase_headers() -> dict[str, str]:
-    api_key = settings.SUPABASE_SERVICE_ROLE_KEY
+    api_key = settings.SUPABASE_SERVICE_ROLE_KEY.strip()
     headers = {"apikey": api_key}
-    if not api_key.startswith("sb_"):
+    if api_key.count(".") == 2:
         headers["Authorization"] = f"Bearer {api_key}"
     return headers
 
