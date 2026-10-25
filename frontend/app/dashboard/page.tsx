@@ -13,12 +13,25 @@ import {
   Sparkles,
   UploadCloud,
   X,
+  Loader2,
 } from "lucide-react";
 import axios from "axios";
 
+type KnowledgeBase = {
+  id: string;
+  user_id?: string;
+  name: string;
+  description?: string;
+  status: string;
+  document_count?: number;
+  documents: number;
+  created_at?: string;
+};
+
 export default function DashboardPage() {
   // State for storing list of knowledge bases
-  const [knowledgeBases, setKnowledgeBases] = useState<any[]>([]);
+  const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   
   // Search input state
   const [search, setSearch] = useState("");
@@ -46,7 +59,7 @@ export default function DashboardPage() {
 
         if (Array.isArray(data)) {
           setKnowledgeBases(
-            data.map((kb: any) => ({
+            data.map((kb: Omit<KnowledgeBase, "documents">) => ({
               id: kb.id,
               user_id: kb.user_id || kb.id,
               name: kb.name,
@@ -59,6 +72,8 @@ export default function DashboardPage() {
         }
       } catch (error) {
         toast.error("Unable to load knowledge bases. Please try again.");
+      } finally {
+        setIsLoading(false);
       }
     }
     fetchKnowledgeBases();
@@ -147,10 +162,10 @@ export default function DashboardPage() {
             </button>
 
             <Link
-              href="/dashboard/chat"
+              href="/dashboard/knowledge-base"
               className="text-sm text-[#6d7484] transition hover:text-[#8172d8]"
             >
-              Explore AI playground
+              Browse knowledge bases
             </Link>
           </div>
         </div>
@@ -176,6 +191,11 @@ export default function DashboardPage() {
           </div>
         </div>
 
+        {isLoading ? (
+          <div className="flex min-h-56 items-center justify-center rounded-2xl border border-dashed border-[#d6cffa] bg-white text-sm text-[#6d7484]">
+            <Loader2 size={18} className="mr-2 animate-spin text-[#8172d8]" /> Loading knowledge bases...
+          </div>
+        ) : (
         <div className="grid gap-4 sm:grid-cols-2">
           {filteredBases.map((base, index) => (
             <Link
@@ -240,6 +260,7 @@ export default function DashboardPage() {
             </span>
           </button>
         </div>
+        )}
 
         {filteredBases.length === 0 && search.trim() && (
           <p className="mt-6 text-sm text-[#6d7484]">

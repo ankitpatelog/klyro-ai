@@ -52,15 +52,12 @@ export default function KnowledgeBaseChatPage() {
   const [question, setQuestion] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSending, setIsSending] = useState(false);
-  const messagesEndRef = useRef(null);
+  const chatScrollRef = useRef(null);
 
   useEffect(() => {
-    if (!knowledgeBaseId) return;
-    loadChat();
-  }, [knowledgeBaseId, apiUrl]);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const chat = chatScrollRef.current;
+    if (!chat) return;
+    chat.scrollTo({ top: chat.scrollHeight, behavior: "smooth" });
   }, [messages, isSending]);
 
   async function loadChat() {
@@ -84,6 +81,13 @@ export default function KnowledgeBaseChatPage() {
       setIsLoading(false);
     }
   }
+
+  useEffect(() => {
+    if (!knowledgeBaseId) return;
+    // The state update occurs after the request resolves.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadChat();
+  }, [knowledgeBaseId, apiUrl]);
 
   async function sendQuestion(event) {
     event.preventDefault();
@@ -141,8 +145,8 @@ export default function KnowledgeBaseChatPage() {
   const isReady = completedDocuments >= 2;
 
   return (
-    <section className="mx-auto flex min-h-[calc(100vh-9rem)] max-w-5xl flex-col pb-8">
-      <div className="mb-5 flex items-center justify-between gap-4">
+    <section className="mx-auto flex h-[calc(100dvh-9rem)] min-h-[36rem] max-w-5xl flex-col pb-8">
+      <div className="mb-5 flex shrink-0 items-center justify-between gap-4">
         <Link href={`/dashboard/knowledge-base/${knowledgeBaseId}`} className="inline-flex items-center gap-2 text-xs font-medium text-[#6d7484] hover:text-[#273045]">
           <ArrowLeft size={15} /> Back to {knowledgeBase?.name || "Knowledge Base"}
         </Link>
@@ -152,7 +156,7 @@ export default function KnowledgeBaseChatPage() {
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-3xl border border-[#e8e5de] bg-white shadow-sm">
-        <div className="flex items-center gap-3 border-b border-[#f0eee9] p-5">
+        <div className="flex shrink-0 items-center gap-3 border-b border-[#f0eee9] p-5">
           <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#ece8ff] text-[#8172d8]"><Bot size={20} /></span>
           <div>
             <h1 className="font-medium text-[#273045]">{knowledgeBase?.name || "Knowledge Base"} Assistant</h1>
@@ -160,7 +164,7 @@ export default function KnowledgeBaseChatPage() {
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-5 sm:p-7">
+        <div ref={chatScrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-5 sm:p-7">
           {!isReady ? (
             <div className="mx-auto mt-12 max-w-md rounded-2xl border border-dashed border-[#d6cffa] bg-white p-7 text-center">
               <FileText className="mx-auto mb-3 text-[#8172d8]" size={30} />
@@ -174,7 +178,7 @@ export default function KnowledgeBaseChatPage() {
               <p className="mt-2 text-sm leading-6 text-[#6d7484]">Ask a question about the completed documents in {knowledgeBase?.name}.</p>
             </div>
           ) : (
-            <>
+            <div className="space-y-5">
               {messages.map((message) => (
                 <div key={message.id} className={`flex gap-3 ${message.role === "user" ? "justify-end" : "justify-start"}`}>
                   {message.role === "assistant" && (
@@ -214,8 +218,7 @@ export default function KnowledgeBaseChatPage() {
                   <Loader2 size={15} className="animate-spin text-[#8172d8]" /> Finding an answer...
                 </div>
               )}
-              <div ref={messagesEndRef} />
-            </>
+            </div>
           )}
         </div>
 

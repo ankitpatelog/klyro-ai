@@ -31,13 +31,6 @@ export default function KnowledgeBaseDetailPage() {
   // API Base URL
   const apiUrl = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000").replace(/\/$/, "");
 
-  // Fetch single knowledge base details and its documents
-  useEffect(() => {
-    if (kbId) {
-      fetchKnowledgeBaseDetails();
-    }
-  }, [kbId, apiUrl]);
-
   async function fetchKnowledgeBaseDetails() {
     setIsLoading(true);
     try {
@@ -56,6 +49,15 @@ export default function KnowledgeBaseDetailPage() {
       setIsLoading(false);
     }
   }
+
+  // Fetch single knowledge base details and its documents
+  useEffect(() => {
+    if (kbId) {
+      // The state update occurs after the request resolves.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      void fetchKnowledgeBaseDetails();
+    }
+  }, [kbId, apiUrl]);
 
   // Handle single file upload
   async function handleFileUpload(e) {

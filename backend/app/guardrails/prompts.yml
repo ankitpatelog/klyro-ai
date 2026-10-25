@@ -1,0 +1,23 @@
+prompts:
+  - task: content_safety_check_input $model=content_safety
+    content: |
+      Check the user message for unsafe content. Mark unsafe when it requests or
+      meaningfully facilitates violence, sexual content involving minors, crime,
+      illegal weapons, controlled substances, self-harm, hate, privacy invasion,
+      threats, fraud, malware, or illegal activity.
+      User: {{ user_input }}
+      Reply only as JSON: {"User Safety": "safe" or "unsafe"}.
+    output_parser: nemoguard_parse_prompt_safety
+    max_tokens: 50
+
+  - task: content_safety_check_output $model=content_safety
+    content: |
+      Check the assistant response for unsafe content. Mark unsafe when it
+      meaningfully facilitates violence, sexual content involving minors, crime,
+      illegal weapons, controlled substances, self-harm, hate, privacy invasion,
+      threats, fraud, malware, or illegal activity.
+      User: {{ user_input }}
+      Assistant: {{ bot_response }}
+      Reply only as JSON: {"Response Safety": "safe" or "unsafe"}.
+    output_parser: nemoguard_parse_response_safety
+    max_tokens: 50

@@ -31,6 +31,14 @@ class Settings(BaseSettings):
     GENERATION_API_URL: str = "https://api.groq.com/openai/v1"
     GENERATION_API_KEY: str = ""
     GENERATION_MODEL: str = "openai/gpt-oss-20b"
+    LITELLM_PRIMARY_MODEL: str = "groq/openai/gpt-oss-20b"
+    LITELLM_FALLBACK_MODELS: str = "groq/qwen/qwen3.8-27b"
+    LITELLM_NUM_RETRIES: int = 1
+    LITELLM_TIMEOUT_SECONDS: int = 90
+    LITELLM_COOLDOWN_SECONDS: int = 30
+    NVIDIA_API_KEY: str = ""
+    NEMO_GUARDRAILS_ENABLED: bool = True
+    NEMO_GUARDRAILS_CONFIG_PATH: str = "app/guardrails"
     RAG_RETRIEVAL_LIMIT: int = 24
     RAG_RERANK_LIMIT: int = 8
     RAG_MAX_CONTEXT_CHARS: int = 12_000

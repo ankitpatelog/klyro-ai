@@ -14,5 +14,6 @@ redis[hiredis]
 httpx
 python-multipart
 pypdf
-langchain-core
+litellm
+nemoguardrails[nvidia]>=0.24.0,<0.25.0
 

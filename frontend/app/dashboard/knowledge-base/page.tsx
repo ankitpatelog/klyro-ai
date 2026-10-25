@@ -17,11 +17,22 @@ import {
   Trash2,
   X,
   ArrowRight,
+  Loader2,
 } from "lucide-react";
 import axios from "axios";
 
+type KnowledgeBase = {
+  id: string;
+  name: string;
+  description?: string;
+  status: string;
+  document_count?: number;
+  documents: number;
+  created_at?: string;
+};
+
 export default function AllKnowledgeBasesPage() {
-  const [knowledgeBases, setKnowledgeBases] = useState<any[]>([]);
+  const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "running" | "stopped">("all");
   const [isLoading, setIsLoading] = useState(true);
@@ -35,11 +46,6 @@ export default function AllKnowledgeBasesPage() {
   // API Base URL
   const apiUrl = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000").replace(/\/$/, "");
 
-  // Fetch all knowledge bases
-  useEffect(() => {
-    fetchKnowledgeBases();
-  }, [apiUrl]);
-
   async function fetchKnowledgeBases() {
     setIsLoading(true);
     try {
@@ -48,7 +54,7 @@ export default function AllKnowledgeBasesPage() {
       });
       if (Array.isArray(response.data)) {
         setKnowledgeBases(
-          response.data.map((kb: any) => ({
+          response.data.map((kb: Omit<KnowledgeBase, "documents">) => ({
             id: kb.id,
             name: kb.name,
             description: kb.description,
@@ -65,6 +71,13 @@ export default function AllKnowledgeBasesPage() {
       setIsLoading(false);
     }
   }
+
+  // Fetch all knowledge bases
+  useEffect(() => {
+    // The state update occurs after the request resolves.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void fetchKnowledgeBases();
+  }, [apiUrl]);
 
   // Toggle Running / Stopped status
   async function toggleStatus(id: string, currentStatus: string) {
@@ -85,11 +98,7 @@ export default function AllKnowledgeBasesPage() {
 
       toast.success(`Knowledge base is now ${newStatus}!`, { id: toastId });
     } catch (error) {
-      // Optimistic update fallback for UI testing if backend patch endpoint isn't ready
-      setKnowledgeBases((prev) =>
-        prev.map((kb) => (kb.id === id ? { ...kb, status: newStatus } : kb))
-      );
-      toast.success(`Knowledge base set to ${newStatus}`, { id: toastId });
+      toast.error("Could not update the knowledge base status.", { id: toastId });
     }
   }
 
@@ -269,8 +278,8 @@ export default function AllKnowledgeBasesPage() {
 
       {/* Knowledge Bases List */}
       {isLoading ? (
-        <div className="py-16 text-center text-sm text-[#6d7484]">
-          Loading knowledge bases...
+        <div className="flex min-h-56 items-center justify-center rounded-2xl border border-dashed border-[#d6cffa] bg-white text-sm text-[#6d7484]">
+          <Loader2 size={18} className="mr-2 animate-spin text-[#8172d8]" /> Loading knowledge bases...
         </div>
       ) : filteredBases.length === 0 ? (
         <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-[#d6cffa] bg-[#ece8ff]/20 p-12 text-center">

@@ -11,6 +11,8 @@ from langchain_core.prompts import ChatPromptTemplate
 from redis.asyncio import Redis
 
 from app.core.config import settings
+from app.services.llm_gateway import generate_chat_completion
+from app.services.safety_service import check_input_safety, check_output_safety
 from app.services.rag.retrieval import rerank, retrieve_hybrid
 
 SYSTEM_PROMPT = """You are a careful knowledge-base assistant. Answer only from the supplied evidence.
@@ -41,10 +43,18 @@ class RagState:
     started_at: float = field(default_factory=time.perf_counter)
 
 
-def input_guard(state: RagState) -> None:
+async def input_guard(state: RagState) -> bool:
     state.question = " ".join(state.question.split())
     if not state.question:
         raise ValueError("Question cannot be empty")
+    decision = await check_input_safety(state.question)
+    if not decision.allowed:
+        state.status = "abstained"
+        state.termination_reason = decision.reason
+        state.answer = decision.message
+        return False
+    state.question = decision.content
+    return True
 
 
 def query_planner(state: RagState) -> Literal["retrieve", "clarify"]:
@@ -90,10 +100,7 @@ def _evidence_text(state: RagState) -> str:
 
 
 async def generate(state: RagState, redis: Redis | None = None) -> None:
-    """Call Groq directly while respecting provider backoff rather than bypassing quotas."""
-    api_key = settings.GROQ_API_KEY or settings.GENERATION_API_KEY
-    if not api_key:
-        raise RuntimeError("GROQ_API_KEY is not configured")
+    """Generate a grounded answer through the LiteLLM routing gateway."""
     messages = [
         {"role": "user" if message.type == "human" else message.type, "content": message.content}
         for message in ANSWER_PROMPT.invoke({"question": state.question, "evidence": _evidence_text(state)}).to_messages()
@@ -101,32 +108,9 @@ async def generate(state: RagState, redis: Redis | None = None) -> None:
     circuit_key = "rag:circuit:generation"
     if redis and await redis.exists(circuit_key):
         raise RuntimeError("Generation provider is temporarily unavailable; please retry shortly")
-    url = f"{settings.GENERATION_API_URL.rstrip('/')}/chat/completions"
-    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {api_key}"}
-    async with httpx.AsyncClient(timeout=90) as client:
-        response = None
-        for attempt in range(settings.RAG_GENERATION_MAX_RETRIES + 1):
-            try:
-                response = await client.post(url, headers=headers, json={
-                    "model": settings.GENERATION_MODEL, "messages": messages, "temperature": 0.1,
-                })
-                if response.status_code not in {429, 500, 502, 503}:
-                    response.raise_for_status()
-                    break
-                if attempt == settings.RAG_GENERATION_MAX_RETRIES:
-                    response.raise_for_status()
-                retry_after = response.headers.get("retry-after")
-                delay = float(retry_after) if retry_after and retry_after.replace(".", "", 1).isdigit() else 2 ** attempt
-                await asyncio.sleep(min(delay, 15))
-            except httpx.TransportError:
-                if attempt == settings.RAG_GENERATION_MAX_RETRIES:
-                    raise
-                await asyncio.sleep(2 ** attempt)
-        if response is None:
-            raise RuntimeError("Generation provider did not return a response")
+    state.answer = await generate_chat_completion(messages)
     if redis:
         await redis.delete(circuit_key)
-    state.answer = response.json()["choices"][0]["message"]["content"].strip()
 
 
 def citation_validator(state: RagState) -> bool:
@@ -152,7 +136,8 @@ def answer_guard(state: RagState) -> None:
 async def run_workflow(state: RagState, redis: Redis | None = None) -> RagState:
     """START → guards/planner → retrieval graph → generation/repair → finalize-ready state."""
     try:
-        input_guard(state)
+        if not await input_guard(state):
+            return state
         if query_planner(state) == "clarify":
             fallback_or_abstain(state, clarification=True)
             return state
@@ -162,6 +147,14 @@ async def run_workflow(state: RagState, redis: Redis | None = None) -> RagState:
             fallback_or_abstain(state)
             return state
         await generate(state, redis)
+        output_decision = await check_output_safety(state.question, state.answer)
+        if not output_decision.allowed:
+            state.status = "abstained"
+            state.termination_reason = output_decision.reason
+            state.answer = output_decision.message
+            state.citations = []
+            return state
+        state.answer = output_decision.content
         if not citation_validator(state):
             # One bounded repair: cite only IDs that were actually retrieved.
             state.retries = 1
