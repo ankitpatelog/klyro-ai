@@ -50,9 +50,22 @@ class Settings(BaseSettings):
     RAG_RETRIEVAL_LIMIT: int = 24
     RAG_RERANK_LIMIT: int = 8
     RAG_MAX_CONTEXT_CHARS: int = 12_000
+    RAG_CONTEXT_TOKEN_BUDGET: int = 3_000
+    RAG_HISTORY_TOKEN_BUDGET: int = 500
+    RAG_HISTORY_RECENT_MESSAGES: int = 4
+    RAG_CACHE_TTL_SECONDS: int = 600
+    RAG_CACHE_SIMILARITY: float = 0.88
     RAG_USER_REQUESTS_PER_MINUTE: int = 10
     RAG_GENERATION_MAX_RETRIES: int = 2
     RAG_CIRCUIT_BREAKER_SECONDS: int = 30
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM_EMAIL: str = ""
+    SMTP_FROM_NAME: str = "Klyro AI"
+    SMTP_USE_TLS: bool = True
+    EMAIL_VERIFICATION_TTL_SECONDS: int = 600
 
     @field_validator("DATABASE_URL", mode="after")
     @classmethod

@@ -19,7 +19,7 @@ from app.core.redis import get_redis
 from app.models.user import User
 from app.repositories.document import completed_document_count
 from app.repositories.knowledge_bases import get_knowledge_base, get_public_knowledge_base
-from app.repositories.rag import add_message, conversation_messages, get_or_create_conversation, save_trace
+from app.repositories.rag import add_message, conversation_messages, get_or_create_conversation, recent_messages, save_trace
 from app.schemas.rag import RagAnswerResponse, RagMessageResponse, RagQuestionRequest
 from app.services.rag.workflow import RagState, run_workflow
 
@@ -36,9 +36,11 @@ async def _persist(db: AsyncSession, state: RagState) -> None:
     await add_message(db, state.conversation_id, "assistant", state.answer)
     await save_trace(db, request_id=state.request_id, conversation_id=state.conversation_id, user_id=state.user_id,
                      knowledge_base_id=state.knowledge_base_id, status=state.status,
-                     termination_reason=state.termination_reason, latency_ms=elapsed, input_tokens=0, output_tokens=0,
+                     termination_reason=state.termination_reason, latency_ms=elapsed, input_tokens=state.input_tokens, output_tokens=state.output_tokens,
                      metadata={"rewritten_query": state.rewritten_query, "candidate_count": len(state.candidates),
-                               "evidence_count": len(state.evidence), "retry_count": state.retries}, error=state.error)
+                               "evidence_count": len(state.evidence), "context_tokens": state.context_tokens,
+                               "history_tokens": state.history_tokens, "cache_hit": state.cache_hit,
+                               "retry_count": state.retries}, error=state.error)
     await db.commit()
 
 
@@ -88,6 +90,7 @@ async def _run_knowledge_base_question(
     persist: bool,
 ) -> RagState:
     """Execute the one shared retrieval and answer pipeline for every chat surface."""
+    history = await recent_messages(db, conversation_id, limit=20) if persist else []
     state = RagState(
         request_id=str(uuid.uuid4()),
         # Public requests resolve their owner from the share token; private
@@ -97,8 +100,8 @@ async def _run_knowledge_base_question(
         knowledge_base_id=str(knowledge_base_id),
         conversation_id=conversation_id,
         question=question,
-        # Messages remain available in the private UI, but never affect retrieval.
-        history=[],
+        # History is compacted only for answer generation; retrieval stays query-only.
+        history=history,
     )
     state = await run_workflow(state, redis)
     if persist:

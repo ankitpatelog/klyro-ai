@@ -27,6 +27,7 @@ from app.schemas.knowledge_base import (
     PublicKnowledgeBaseDirectoryItem,
     PublicShareLinkResponse,
 )
+from app.services.email_service import send_knowledge_base_created_email, send_knowledge_base_deleted_email
 
 
 router = APIRouter()
@@ -43,7 +44,9 @@ async def create(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    return await create_knowledge_base(db, user_id=current_user.id, **payload.model_dump())
+    knowledge_base = await create_knowledge_base(db, user_id=current_user.id, **payload.model_dump())
+    await send_knowledge_base_created_email(current_user.email, knowledge_base.name)
+    return knowledge_base
 
 # get all knowledge base 
 @router.get("/knowledgebase", response_model=list[KnowledgeBaseResponse])
@@ -128,5 +131,7 @@ async def delete(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    if not await delete_knowledge_base(db, knowledge_base_id, current_user.id):
+    knowledge_base = await get_knowledge_base(db, knowledge_base_id, current_user.id)
+    if not knowledge_base or not await delete_knowledge_base(db, knowledge_base_id, current_user.id):
         raise _not_found()
+    await send_knowledge_base_deleted_email(current_user.email, knowledge_base.name)

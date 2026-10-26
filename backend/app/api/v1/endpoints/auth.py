@@ -12,9 +12,10 @@ from app.core.security import decode_token, hash_password, token_hash, verify_pa
 from app.db.session import get_db
 from app.models.user import User
 from app.repositories.token_sessions import is_access_token_active
-from app.repositories.users import get_user_by_id
-from app.schemas.auth import ConfirmAccountActionRequest, LoginRequest, ProfileUpdateRequest, RefreshRequest, RegisterRequest, RegisterResponse, TokenResponse
+from app.repositories.users import get_user_by_email, get_user_by_id
+from app.schemas.auth import ConfirmAccountActionRequest, LoginRequest, PasswordResetConfirmRequest, PasswordResetRequest, ProfileUpdateRequest, RefreshRequest, RegisterRequest, RegisterResponse, TokenResponse, VerifyEmailRequest
 from app.services.auth_service import login_user, logout_user, refresh_user_tokens, register_user
+from app.services.email_service import issue_password_reset_code, issue_verification_code, send_all_knowledge_bases_deleted_email, send_email_verified_email, send_password_changed_email, verify_code, verify_password_reset_code
 
 
 router = APIRouter()
@@ -85,9 +86,12 @@ async def get_current_user(
 
 
 @router.post("/register", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED)
-async def register(req: RegisterRequest, db: AsyncSession = Depends(get_db)):
+async def register(req: RegisterRequest, response: Response, db: AsyncSession = Depends(get_db), redis: Redis = Depends(get_redis)):
     try:
         user = await register_user(db, req.email, req.full_name, req.password)
+        await issue_verification_code(redis, str(user.id), user.email)
+        access_token, refresh_token = await login_user(db, redis, user.email, req.password)
+        _set_auth_cookies(response, access_token, refresh_token)
         return RegisterResponse(
             id=user.id,
             email=user.email,
@@ -116,6 +120,24 @@ async def login(req: LoginRequest, response: Response, db: AsyncSession = Depend
         return TokenResponse(access_token=access_token, refresh_token=refresh_token)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+
+
+@router.post("/password-reset/request", status_code=status.HTTP_204_NO_CONTENT)
+async def request_password_reset(payload: PasswordResetRequest, db: AsyncSession = Depends(get_db), redis: Redis = Depends(get_redis)):
+    """Always return success so this endpoint does not expose registered emails."""
+    user = await get_user_by_email(db, str(payload.email).lower())
+    if user and user.is_active:
+        await issue_password_reset_code(redis, str(user.id), user.email)
+
+
+@router.post("/password-reset/confirm", status_code=status.HTTP_204_NO_CONTENT)
+async def confirm_password_reset(payload: PasswordResetConfirmRequest, db: AsyncSession = Depends(get_db), redis: Redis = Depends(get_redis)):
+    user = await get_user_by_email(db, str(payload.email).lower())
+    if not user or not await verify_password_reset_code(redis, str(user.id), payload.code):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="The reset code is invalid or has expired")
+    await db.execute(text("UPDATE users SET password_hash = :password_hash WHERE id = :id"), {"password_hash": hash_password(payload.new_password), "id": str(user.id)})
+    await db.commit()
+    await send_password_changed_email(user.email)
 
 
 # generate refresh + access token when the access toekn is expired so it rotated the whole token and store new token inside the redis andd the server cookie
@@ -190,6 +212,7 @@ async def update_profile(
     payload: ProfileUpdateRequest,
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
+    redis: Redis = Depends(get_redis),
 ):
     if payload.new_password and not payload.current_password:
         raise HTTPException(status_code=422, detail="Current password is required to set a new password")
@@ -199,9 +222,10 @@ async def update_profile(
     if payload.full_name is not None:
         changes["full_name"] = payload.full_name.strip()
     if payload.email is not None:
-        changes["email"] = str(payload.email).lower()
-    if payload.avatar_url is not None:
-        changes["avatar_url"] = payload.avatar_url.strip() or None
+        next_email = str(payload.email).lower()
+        changes["email"] = next_email
+        if next_email != current_user.email:
+            changes["email_verified_at"] = None
     if payload.new_password:
         changes["password_hash"] = hash_password(payload.new_password)
     if not changes:
@@ -210,13 +234,30 @@ async def update_profile(
         assignments = ", ".join(f"{column} = :{column}" for column in changes)
         row = await db.execute(text(f"""
             UPDATE users SET {assignments} WHERE id = :id
-            RETURNING id, email, full_name, avatar_url, created_at
+            RETURNING id, email, full_name, email_verified_at, created_at
         """), {**changes, "id": str(current_user.id)})
         await db.commit()
     except Exception as exc:
         await db.rollback()
         raise HTTPException(status_code=409, detail="That email address is already in use") from exc
-    return dict(row.mappings().one())
+    updated = dict(row.mappings().one())
+    if updated["email"] != current_user.email:
+        await issue_verification_code(redis, str(current_user.id), updated["email"])
+    return updated
+
+
+@router.post("/email-verification/request", status_code=status.HTTP_204_NO_CONTENT)
+async def request_email_verification(current_user: User = Depends(get_current_user), redis: Redis = Depends(get_redis)):
+    await issue_verification_code(redis, str(current_user.id), current_user.email)
+
+
+@router.post("/email-verification/verify", status_code=status.HTTP_204_NO_CONTENT)
+async def verify_email(payload: VerifyEmailRequest, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db), redis: Redis = Depends(get_redis)):
+    if not await verify_code(redis, str(current_user.id), payload.code):
+        raise HTTPException(status_code=422, detail="The verification code is invalid or has expired")
+    await db.execute(text("UPDATE users SET email_verified_at = NOW() WHERE id = :id"), {"id": str(current_user.id)})
+    await db.commit()
+    await send_email_verified_email(current_user.email)
 
 
 @router.get("/account/usage")
@@ -248,6 +289,7 @@ async def delete_all_knowledge_bases(payload: ConfirmAccountActionRequest, curre
         raise HTTPException(status_code=400, detail="Confirmation or password is incorrect")
     await db.execute(text("DELETE FROM knowledgebases WHERE user_id = :user_id"), {"user_id": str(current_user.id)})
     await db.commit()
+    await send_all_knowledge_bases_deleted_email(current_user.email)
 
 
 @router.delete("/account", status_code=status.HTTP_204_NO_CONTENT)

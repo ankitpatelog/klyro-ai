@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import toast from "react-hot-toast";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowLeft,
   BookOpen,
@@ -27,6 +27,8 @@ export default function KnowledgeBaseDetailPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
+  const [uploadProgress, setUploadProgress] = useState(null);
+  const socketsRef = useRef(new Map());
 
   // API Base URL
   const apiUrl = (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000").replace(/\/$/, "");
@@ -59,6 +61,40 @@ export default function KnowledgeBaseDetailPage() {
     }
   }, [kbId, apiUrl]);
 
+  function connectDocumentStatus(documentId) {
+    if (!documentId || socketsRef.current.has(documentId)) return;
+    const socketUrl = `${apiUrl.replace(/^http/, "ws")}/ws/documents/${documentId}`;
+    const socket = new WebSocket(socketUrl);
+    socketsRef.current.set(documentId, socket);
+
+    socket.onmessage = (event) => {
+      const update = JSON.parse(event.data);
+      setDocuments((current) => current.map((document) =>
+        String(document.id || document._id) === String(documentId) ? { ...document, ...update } : document
+      ));
+      setUploadProgress((current) => current?.documentId === documentId ? { ...current, ...update } : current);
+      if (update.status === "completed" || update.status === "failed") {
+        socket.close();
+        socketsRef.current.delete(documentId);
+        if (update.status === "completed") void fetchKnowledgeBaseDetails();
+      }
+    };
+    socket.onerror = () => socket.close();
+    socket.onclose = () => socketsRef.current.delete(documentId);
+  }
+
+  useEffect(() => {
+    documents.forEach((document) => {
+      const documentId = document.id || document._id;
+      if (documentId && !["completed", "failed"].includes(document.status)) connectDocumentStatus(documentId);
+    });
+  }, [documents]); // Connect each in-progress document once; the ref prevents duplicate sockets.
+
+  useEffect(() => () => {
+    socketsRef.current.forEach((socket) => socket.close());
+    socketsRef.current.clear();
+  }, []);
+
   // Handle single file upload
   async function handleFileUpload(e) {
     e.preventDefault();
@@ -71,6 +107,7 @@ export default function KnowledgeBaseDetailPage() {
     formData.append("file", selectedFile);
 
     setIsUploading(true);
+    setUploadProgress({ progress: 0, stage: "uploading", message: "Uploading document" });
     const toastId = toast.loading("Uploading document...");
 
     try {
@@ -82,6 +119,14 @@ export default function KnowledgeBaseDetailPage() {
           headers: {
             "Content-Type": "multipart/form-data",
           },
+          onUploadProgress: (progressEvent) => {
+            if (!progressEvent.total) return;
+            setUploadProgress({
+              progress: Math.round((progressEvent.loaded * 100) / progressEvent.total),
+              stage: "uploading",
+              message: "Uploading document",
+            });
+          },
         }
       );
 
@@ -92,6 +137,8 @@ export default function KnowledgeBaseDetailPage() {
       };
 
       setDocuments((prev) => [newDoc, ...prev]);
+      setUploadProgress({ documentId: newDoc.id, progress: 0, stage: "queued", message: "Queued for processing" });
+      connectDocumentStatus(newDoc.id);
 
       setKnowledgeBase((prev) => ({
         ...prev,
@@ -99,12 +146,18 @@ export default function KnowledgeBaseDetailPage() {
       }));
 
       setSelectedFile(null);
-      toast.success("Document uploaded successfully!", { id: toastId });
+      toast.success("Upload complete. Processing has started.", { id: toastId });
 
       const fileInput = document.getElementById("file-upload-input");
       if (fileInput) fileInput.value = "";
     } catch (error) {
-      toast.error("Failed to upload document.", { id: toastId });
+      setUploadProgress(null);
+      if (axios.isAxiosError(error) && error.response?.status === 403) {
+        toast.error(error.response.data?.detail || "Verify your email before uploading.", { id: toastId });
+        router.push("/verify-email");
+      } else {
+        toast.error("Failed to upload document.", { id: toastId });
+      }
     } finally {
       setIsUploading(false);
     }
@@ -338,6 +391,19 @@ export default function KnowledgeBaseDetailPage() {
                   </button>
                 </div>
               )}
+
+              {uploadProgress && (
+                <div className="rounded-xl border border-[#ddd8f2] bg-[#f7f5ff] px-4 py-3" role="status" aria-live="polite">
+                  <div className="mb-2 flex items-center justify-between gap-3 text-xs">
+                    <span className="font-medium text-[#4d4770]">{uploadProgress.message || "Processing document"}</span>
+                    <span className="shrink-0 text-[#7161d7]">{uploadProgress.progress || 0}%</span>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full bg-[#e3dff5]">
+                    <div className="h-full rounded-full bg-[#8172d8] transition-[width] duration-500" style={{ width: `${uploadProgress.progress || 0}%` }} />
+                  </div>
+                  {uploadProgress.total_chunks > 0 && <p className="mt-2 text-[11px] text-[#6d7484]">{uploadProgress.embedded_chunks || 0} of {uploadProgress.total_chunks} chunks embedded</p>}
+                </div>
+              )}
             </form>
           </div>
 
@@ -363,6 +429,9 @@ export default function KnowledgeBaseDetailPage() {
                 {documents.map((doc, idx) => {
                   const docId = doc.id || doc._id;
                   const docName = doc.name || doc.filename || "Unnamed Document";
+                  const documentStatus = doc.status || "queued";
+                  const isProcessing = !["completed", "failed"].includes(documentStatus);
+                  const progress = doc.progress || 0;
 
                   return (
                     <div
@@ -378,9 +447,13 @@ export default function KnowledgeBaseDetailPage() {
                             {docName}
                           </p>
                           <p className="text-[11px] text-[#6d7484]">
-                            Added{" "}
-                            {doc.created_at ? new Date(doc.created_at).toLocaleDateString() : "Recently"}
+                            {isProcessing ? (doc.message || "Waiting to process") : documentStatus === "completed" ? "Ready for chat" : (doc.error_message || "Processing failed")}
                           </p>
+                          {isProcessing && (
+                            <div className="mt-2 h-1.5 w-36 overflow-hidden rounded-full bg-[#e3dff5]" title={`${progress}%`}>
+                              <div className="h-full rounded-full bg-[#8172d8] transition-[width] duration-500" style={{ width: `${progress}%` }} />
+                            </div>
+                          )}
                         </div>
                       </div>
 

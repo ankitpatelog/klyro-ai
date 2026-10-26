@@ -14,12 +14,13 @@ from app.core.config import settings
 from app.services.llm_gateway import generate_chat_completion
 from app.services.safety_service import check_input_safety, check_output_safety
 from app.services.rag.retrieval import rerank, retrieve_hybrid
+from app.services.rag.optimization import budget_evidence, cache_answer, compact_history, estimate_tokens, get_cached_answer
 
 SYSTEM_PROMPT = """You are a careful knowledge-base assistant. Answer only from the supplied evidence.
 Read all supplied evidence before deciding it is insufficient, especially for questions asking for a count, list, or fact. Use concise Markdown: headings when useful, bullets for lists, and **bold** for key terms. Cite evidence inline using [chunk:<id>]. Do not invent citations."""
 ANSWER_PROMPT = ChatPromptTemplate.from_messages([
     ("system", SYSTEM_PROMPT),
-    ("human", "Question: {question}\n\nEvidence:\n{evidence}"),
+    ("human", "Conversation memory (may be empty):\n{history}\n\nQuestion: {question}\n\nEvidence:\n{evidence}"),
 ])
 
 
@@ -40,6 +41,11 @@ class RagState:
     termination_reason: str = ""
     error: str | None = None
     retries: int = 0
+    cache_hit: bool = False
+    context_tokens: int = 0
+    history_tokens: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
     started_at: float = field(default_factory=time.perf_counter)
 
 
@@ -78,15 +84,10 @@ def evidence_checker(state: RagState) -> bool:
     state.evidence = rerank(state.rewritten_query, state.candidates)
     if not state.evidence:
         return False
-    used, chars = [], 0
-    for evidence in state.evidence:
-        text = str(evidence["payload"].get("text", ""))
-        if not text or chars + len(text) > settings.RAG_MAX_CONTEXT_CHARS:
-            continue
-        used.append(evidence)
-        chars += len(text)
-    state.evidence = used
-    return bool(used)
+    state.evidence, state.context_tokens = budget_evidence(
+        state.evidence, max_tokens=settings.RAG_CONTEXT_TOKEN_BUDGET
+    )
+    return bool(state.evidence)
 
 
 def fallback_or_abstain(state: RagState, clarification: bool = False) -> None:
@@ -96,19 +97,27 @@ def fallback_or_abstain(state: RagState, clarification: bool = False) -> None:
 
 
 def _evidence_text(state: RagState) -> str:
-    return "\n\n".join(f"[chunk:{item['id']}] {item['payload'].get('text', '')}" for item in state.evidence)
+    return "\n\n".join(str(item.get("context_text", "")) for item in state.evidence)
 
 
 async def generate(state: RagState, redis: Redis | None = None) -> None:
     """Generate a grounded answer through the LiteLLM routing gateway."""
+    history, state.history_tokens = compact_history(
+        state.history,
+        recent_messages=settings.RAG_HISTORY_RECENT_MESSAGES,
+        budget_tokens=settings.RAG_HISTORY_TOKEN_BUDGET,
+    )
+    evidence = _evidence_text(state)
     messages = [
         {"role": "user" if message.type == "human" else message.type, "content": message.content}
-        for message in ANSWER_PROMPT.invoke({"question": state.question, "evidence": _evidence_text(state)}).to_messages()
+        for message in ANSWER_PROMPT.invoke({"question": state.question, "history": history, "evidence": evidence}).to_messages()
     ]
+    state.input_tokens = sum(estimate_tokens(message["content"]) for message in messages)
     circuit_key = "rag:circuit:generation"
     if redis and await redis.exists(circuit_key):
         raise RuntimeError("Generation provider is temporarily unavailable; please retry shortly")
     state.answer = await generate_chat_completion(messages)
+    state.output_tokens = estimate_tokens(state.answer)
     if redis:
         await redis.delete(circuit_key)
 
@@ -153,6 +162,18 @@ async def run_workflow(state: RagState, redis: Redis | None = None) -> RagState:
             fallback_or_abstain(state, clarification=True)
             return state
         query_rewriter(state)
+        cached = await get_cached_answer(
+            redis, knowledge_base_id=state.knowledge_base_id, question=state.rewritten_query,
+            similarity=settings.RAG_CACHE_SIMILARITY,
+        )
+        if cached:
+            state.answer = str(cached["answer"])
+            state.citations = list(cached.get("citations", []))
+            state.cache_hit = True
+            state.status = "answered"
+            state.termination_reason = "semantic_cache_hit"
+            state.output_tokens = estimate_tokens(state.answer)
+            return state
         await retrieve(state)
         if not evidence_checker(state):
             fallback_or_abstain(state)
@@ -168,6 +189,10 @@ async def run_workflow(state: RagState, redis: Redis | None = None) -> RagState:
         state.answer = output_decision.content
         citation_validator(state)
         answer_guard(state)
+        await cache_answer(
+            redis, knowledge_base_id=state.knowledge_base_id, question=state.rewritten_query,
+            answer=state.answer, citations=state.citations, ttl_seconds=settings.RAG_CACHE_TTL_SECONDS,
+        )
     except Exception as exc:
         if redis and isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in {429, 500, 502, 503}:
             await redis.set("rag:circuit:generation", "open", ex=settings.RAG_CIRCUIT_BREAKER_SECONDS)

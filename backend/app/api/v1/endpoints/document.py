@@ -76,6 +76,8 @@ async def upload_document(
     knowledge_base = await get_knowledge_base(db, knowledge_base_id, current_user.id)
     if not knowledge_base:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Knowledge base not found")
+    if not current_user.email_verified_at:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Verify your email before uploading a document")
 
     content = await file.read(MAX_FILE_SIZE + 1)
     filename = file.filename or ""
@@ -119,6 +121,11 @@ async def upload_document(
                 "knowledge_base_id": str(knowledge_base_id),
             }),
         )
+        await redis.publish("document:status", json.dumps({
+            "document_id": str(document_id), "status": "queued", "progress": 0,
+            "stage": "queued", "message": "Queued for processing",
+            "total_chunks": 0, "embedded_chunks": 0,
+        }))
     except Exception:
         logger.exception("Document %s is queued but Redis notification failed", document_id)
 

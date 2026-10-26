@@ -52,6 +52,7 @@ export default function KnowledgeBaseChatPage() {
   const [question, setQuestion] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSending, setIsSending] = useState(false);
+  const [answerProgress, setAnswerProgress] = useState(0);
   const chatScrollRef = useRef(null);
 
   useEffect(() => {
@@ -59,6 +60,14 @@ export default function KnowledgeBaseChatPage() {
     if (!chat) return;
     chat.scrollTo({ top: chat.scrollHeight, behavior: "smooth" });
   }, [messages, isSending]);
+
+  useEffect(() => {
+    if (!isSending) return;
+    const timer = window.setInterval(() => {
+      setAnswerProgress((current) => Math.min(95, current + Math.max(1, Math.ceil((95 - current) * 0.12))));
+    }, 450);
+    return () => window.clearInterval(timer);
+  }, [isSending]);
 
   async function loadChat() {
     setIsLoading(true);
@@ -103,6 +112,7 @@ export default function KnowledgeBaseChatPage() {
     setMessages((current) => [...current, optimisticMessage]);
     setQuestion("");
     setIsSending(true);
+    setAnswerProgress(8);
 
     try {
       const response = await axios.post(
@@ -125,6 +135,7 @@ export default function KnowledgeBaseChatPage() {
       toast.error(error.response?.data?.detail || "The assistant could not answer right now.");
     } finally {
       setIsSending(false);
+      setAnswerProgress(0);
     }
   }
 
@@ -214,8 +225,16 @@ export default function KnowledgeBaseChatPage() {
                 </div>
               ))}
               {isSending && (
-                <div className="flex items-center gap-2 text-sm text-[#6d7484]">
-                  <Loader2 size={15} className="animate-spin text-[#8172d8]" /> Finding an answer...
+                <div className="max-w-sm rounded-2xl border border-[#ddd8f2] bg-[#f7f5ff] px-4 py-3" role="status" aria-live="polite">
+                  <div className="mb-2 flex items-center justify-between gap-3 text-xs font-medium text-[#5d5b76]">
+                    <span className="flex items-center gap-2">
+                    <Loader2 size={14} className="animate-spin text-[#8172d8]" /> Preparing your answer
+                    </span>
+                    <span className="text-[#7161d7]">{answerProgress}%</span>
+                  </div>
+                  <div className="h-1.5 overflow-hidden rounded-full bg-[#e3dff5]">
+                    <div className="h-full rounded-full bg-[#8172d8] transition-[width] duration-300" style={{ width: `${answerProgress}%` }} />
+                  </div>
                 </div>
               )}
             </div>

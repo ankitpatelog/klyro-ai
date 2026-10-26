@@ -1,6 +1,7 @@
 "use client";
 
 import axios from "axios";
+import { Eye, EyeOff } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -12,9 +13,10 @@ export default function RegisterPage() {
   const router = useRouter();
   const [form, setForm] = useState({ fullName: "", email: "", password: "" });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   useEffect(() => {
-    toast("Create your Kyro workspace account.", { icon: "✨" });
+    toast("Create your Klyro-ai workspace account.", { icon: "✨" });
   }, []);
 
   async function handleRegister() {
@@ -26,9 +28,10 @@ export default function RegisterPage() {
         full_name: form.fullName,
         email: form.email,
         password: form.password,
-      });
-      toast.success("Account created! You can sign in now.", { id: toastId });
-      router.push("/");
+      }, { withCredentials: true });
+      toast.success("Account created! Check your email for the four-digit verification code.", { id: toastId });
+      const nextPath = new URLSearchParams(window.location.search).get("next");
+      router.replace(nextPath ? `/verify-email?next=${encodeURIComponent(nextPath)}` : "/verify-email");
     } catch (error) {
       const message = axios.isAxiosError<{ detail?: string }>(error)
         ? error.response?.data.detail ?? "We couldn’t create your account. Please try again."
@@ -56,7 +59,12 @@ export default function RegisterPage() {
           <input id="email" type="email" autoComplete="email" placeholder="you@example.com" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} required />
 
           <label htmlFor="password">Password</label>
-          <input id="password" type="password" autoComplete="new-password" minLength={8} placeholder="At least 8 characters" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} required />
+          <div className="password-field">
+            <input id="password" type={showPassword ? "text" : "password"} autoComplete="new-password" minLength={8} placeholder="At least 8 characters" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} required />
+            <button className="password-toggle" type="button" onClick={() => setShowPassword(!showPassword)} aria-label={showPassword ? "Hide password" : "Show password"}>
+              {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+            </button>
+          </div>
 
           <button type="submit" disabled={isSubmitting}>{isSubmitting ? "Creating account…" : "Create account"}</button>
         </form>

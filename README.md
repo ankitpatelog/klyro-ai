@@ -21,6 +21,30 @@
   - Inputs/Search: `h-10 rounded-xl border border-[#e8e5de] bg-white px-3 outline-none`
 
 
+
+Implement 6 core features. That is enough to make the project feel production-ready without becoming over-engineered.
+Contextual chunking with metadata
+Better chunks improve retrieval quality and reduce irrelevant tokens.
+
+Hybrid retrieval + reranking
+Combines semantic and keyword search, then selects only the best sources for the final prompt.
+
+Token-budget manager
+Caps context sent to the model and prioritizes the most relevant chunks. This is the clearest token-optimization feature.
+
+Conversation memory summarization
+Summarizes older chat messages instead of sending the whole conversation every time.
+
+Semantic cache
+Reuses answers for repeated or very similar questions, cutting latency and LLM cost.
+
+Observability dashboard
+Track tokens, cost, latency, cache-hit rate, retrieved chunks, and model used. This proves the optimizations actually work.
+
+Why these six: together they cover the complete RAG lifecycle—document preparation, retrieval quality, prompt-size control, chat scalability, cost reduction, and measurable results. That is excellent material for an interview.
+
+
+
 cd D:\klyro-ai\backend
 .\kyro\Scripts\python.exe -m app.workers.embedding_worker
 

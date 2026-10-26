@@ -56,23 +56,31 @@ def _require_settings() -> None:
         raise RuntimeError(f"Worker configuration missing: {', '.join(missing)}")
 
 
-def _chunks(text_value: str) -> list[str]:
-    text_value = "\n".join(line.strip() for line in text_value.splitlines() if line.strip())
+def _chunks(text_value: str) -> list[tuple[str, str]]:
+    lines = [line.strip() for line in text_value.splitlines() if line.strip()]
+    text_value = "\n".join(lines)
     if not text_value:
         return []
-    result: list[str] = []
+    result: list[tuple[str, str]] = []
     start = 0
+    heading = "Document excerpt"
     while start < len(text_value):
         end = min(len(text_value), start + CHUNK_SIZE)
         if end < len(text_value):
             split_at = max(text_value.rfind("\n", start, end), text_value.rfind(" ", start, end))
             if split_at > start + CHUNK_SIZE // 2:
                 end = split_at
-        result.append(text_value[start:end].strip())
+        chunk = text_value[start:end].strip()
+        # Preserve the nearest short heading as retrieval context without changing stored document text.
+        for line in reversed(chunk.splitlines()[:3]):
+            if len(line) <= 120 and (line.endswith(":") or line.isupper() or line.startswith("#")):
+                heading = line.lstrip("# ").rstrip(":") or heading
+                break
+        result.append((chunk, heading))
         if end == len(text_value):
             break
         start = end - CHUNK_OVERLAP
-    return [chunk for chunk in result if chunk]
+    return [(chunk, heading) for chunk, heading in result if chunk]
 
 
 def _extract_text(filename: str, content: bytes) -> str:
@@ -152,7 +160,8 @@ async def _claim_job(document_id: str) -> dict[str, object] | None:
 
 
 async def _update_progress(document_id: str, completed: int, total: int) -> None:
-    progress = max(1, min(99, int(completed * 100 / total)))
+    # Reserve early progress for download/text extraction and the last 5% for finalizing.
+    progress = max(30, min(95, 30 + int(completed * 65 / total)))
     async with SessionLocal() as db:
         await db.execute(text("""
             UPDATE documents SET total_chunks = :total, embedded_chunks = :completed, updated_at = NOW()
@@ -182,36 +191,42 @@ async def process_job(redis, document_id: str) -> None:
     if not document:
         return
         # update redis status for document
-    await _publish(redis, document_id, "processing", 1)
+    await _publish(redis, document_id, "processing", 5, stage="downloading", message="Downloading document")
     try:
-        document_text = _extract_text(str(document["filename"]), await _download_file(str(document["storage_path"])))
+        content = await _download_file(str(document["storage_path"]))
+        await _publish(redis, document_id, "processing", 15, stage="extracting", message="Extracting text")
+        document_text = _extract_text(str(document["filename"]), content)
         chunks = _chunks(document_text)
         if not chunks:
             raise ValueError("No extractable text was found in this document")
+        await _publish(redis, document_id, "processing", 25, stage="chunking", message=f"Split document into {len(chunks)} chunks", total_chunks=len(chunks), embedded_chunks=0)
         await _ensure_qdrant_collection()
         total = len(chunks)
+        await _publish(redis, document_id, "processing", 30, stage="embedding", message="Creating embeddings", total_chunks=total, embedded_chunks=0)
         for start in range(0, total, EMBEDDING_BATCH_SIZE):
             chunk_batch = chunks[start:start + EMBEDDING_BATCH_SIZE]
-            vectors = await _embed(chunk_batch)
+            vectors = await _embed([chunk for chunk, _ in chunk_batch])
             points: list[dict[str, object]] = []
-            for offset, (chunk, vector) in enumerate(zip(chunk_batch, vectors)):
+            for offset, ((chunk, heading), vector) in enumerate(zip(chunk_batch, vectors)):
                 index = start + offset
                 points.append({
                     "id": str(uuid.uuid5(uuid.UUID(document_id), str(index))), "vector": vector,
                     "payload": {"user_id": str(document["user_id"]), "knowledge_base_id": str(document["knowledge_base_id"]),
-                                "document_id": document_id, "chunk_index": index, "source_file_name": str(document["filename"]), "text": chunk},
+                                "document_id": document_id, "chunk_index": index, "source_file_name": str(document["filename"]),
+                                "section_heading": heading, "text": chunk},
                 })
             await _upsert_qdrant(points)
             completed = min(start + len(chunk_batch), total)
             await _update_progress(document_id, completed, total)
-            await _publish(redis, document_id, "processing", int(completed * 100 / total), total_chunks=total, embedded_chunks=completed)
+            progress = max(30, min(95, 30 + int(completed * 65 / total)))
+            await _publish(redis, document_id, "processing", progress, stage="embedding", message=f"Embedding chunk {completed} of {total}", total_chunks=total, embedded_chunks=completed)
         await _finish(document_id)
-        await _publish(redis, document_id, "completed", 100, total_chunks=total, embedded_chunks=total)
+        await _publish(redis, document_id, "completed", 100, stage="completed", message="Document is ready to chat with", total_chunks=total, embedded_chunks=total)
     except Exception as exc:
         logger.exception("Embedding failed for document %s", document_id)
         message = str(exc)[:500] or "Embedding failed"
         await _finish(document_id, message)
-        await _publish(redis, document_id, "failed", 0, error_message=message)
+        await _publish(redis, document_id, "failed", 0, stage="failed", message="Document processing failed", error_message=message)
 
 
 async def main() -> None:
