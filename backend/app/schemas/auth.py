@@ -42,3 +42,16 @@ class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str = "bearer"
+
+
+class ProfileUpdateRequest(BaseModel):
+    full_name: str | None = Field(default=None, min_length=1, max_length=120)
+    email: EmailStr | None = None
+    avatar_url: str | None = Field(default=None, max_length=2_000)
+    current_password: str | None = Field(default=None, min_length=1, max_length=72)
+    new_password: str | None = Field(default=None, min_length=8, max_length=72)
+
+
+class ConfirmAccountActionRequest(BaseModel):
+    confirmation: str = Field(..., min_length=1, max_length=32)
+    current_password: str = Field(..., min_length=1, max_length=72)

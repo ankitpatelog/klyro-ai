@@ -2,12 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Menu, X, FolderOpen, LayoutDashboard, Sparkles } from "lucide-react";
+import { Menu, X, FolderOpen, LayoutDashboard, Settings, Sparkles, Globe2 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 const navigation = [
   { href: "/dashboard", label: "Overview", icon: LayoutDashboard, exact: true },
   { href: "/dashboard/knowledge-base", label: "Knowledge bases", icon: FolderOpen },
+  { href: "/dashboard/public-knowledge-bases", label: "Public directory", icon: Globe2 },
+  { href: "/dashboard/settings", label: "Settings", icon: Settings },
 ];
 
 export default function DashboardShell({ children }: { children: ReactNode }) {

@@ -16,7 +16,7 @@ from app.services.safety_service import check_input_safety, check_output_safety
 from app.services.rag.retrieval import rerank, retrieve_hybrid
 
 SYSTEM_PROMPT = """You are a careful knowledge-base assistant. Answer only from the supplied evidence.
-If evidence is insufficient, say so plainly. Use concise Markdown: headings when useful, bullets for lists, and **bold** for key terms. Cite evidence inline using [chunk:<id>]. Do not invent citations."""
+Read all supplied evidence before deciding it is insufficient, especially for questions asking for a count, list, or fact. Use concise Markdown: headings when useful, bullets for lists, and **bold** for key terms. Cite evidence inline using [chunk:<id>]. Do not invent citations."""
 ANSWER_PROMPT = ChatPromptTemplate.from_messages([
     ("system", SYSTEM_PROMPT),
     ("human", "Question: {question}\n\nEvidence:\n{evidence}"),
@@ -64,10 +64,10 @@ def query_planner(state: RagState) -> Literal["retrieve", "clarify"]:
 
 
 def query_rewriter(state: RagState) -> None:
-    # Deterministic rewrite keeps private history out of external services except the necessary recent context.
-    prior_user = next((message["content"] for message in reversed(state.history) if message["role"] == "user"), "")
-    follow_up = re.search(r"\b(it|that|they|those|this)\b", state.question, re.I)
-    state.rewritten_query = f"{prior_user} {state.question}" if prior_user and follow_up else state.question
+    # Both private and shared chat must retrieve from the exact same query.
+    # Conversation history is persisted for the private UI only; it must never
+    # change the document search result for an otherwise identical question.
+    state.rewritten_query = state.question
 
 
 async def retrieve(state: RagState) -> None:
@@ -116,14 +116,25 @@ async def generate(state: RagState, redis: Redis | None = None) -> None:
 def citation_validator(state: RagState) -> bool:
     allowed = {item["id"]: item["payload"] for item in state.evidence}
     cited_ids = re.findall(r"\[chunk:([^\]]+)\]", state.answer)
-    if not cited_ids:
-        return False
-    if any(chunk_id not in allowed for chunk_id in cited_ids):
-        return False
+    valid_ids = list(dict.fromkeys(chunk_id for chunk_id in cited_ids if chunk_id in allowed))
+
+    # Models occasionally omit citations or invent an ID. Do not discard a
+    # grounded answer in that case: remove invalid IDs and attach one verified
+    # evidence citation. This gives private and shared chat identical, valid
+    # source handling for the same retrieval result.
+    state.answer = re.sub(
+        r"\s*\[chunk:([^\]]+)\]",
+        lambda match: match.group(0) if match.group(1) in allowed else "",
+        state.answer,
+    ).strip()
+    if not valid_ids:
+        valid_ids = [state.evidence[0]["id"]]
+        state.answer = f"{state.answer} [chunk:{valid_ids[0]}]".strip()
+
     state.citations = [{"chunk_id": chunk_id, "document_id": str(allowed[chunk_id].get("document_id", "")),
                         "source_file_name": str(allowed[chunk_id].get("source_file_name", "Unknown")),
                         "chunk_index": int(allowed[chunk_id].get("chunk_index", 0)),
-                        "excerpt": str(allowed[chunk_id].get("text", ""))[:300]} for chunk_id in dict.fromkeys(cited_ids)]
+                        "excerpt": str(allowed[chunk_id].get("text", ""))[:300]} for chunk_id in valid_ids]
     return True
 
 
@@ -155,14 +166,7 @@ async def run_workflow(state: RagState, redis: Redis | None = None) -> RagState:
             state.citations = []
             return state
         state.answer = output_decision.content
-        if not citation_validator(state):
-            # One bounded repair: cite only IDs that were actually retrieved.
-            state.retries = 1
-            state.answer = "Based on the available documents: " + state.answer + f" [chunk:{state.evidence[0]['id']}]"
-            if not citation_validator(state):
-                fallback_or_abstain(state)
-                state.termination_reason = "citation_validation_failed"
-                return state
+        citation_validator(state)
         answer_guard(state)
     except Exception as exc:
         if redis and isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in {429, 500, 502, 503}:

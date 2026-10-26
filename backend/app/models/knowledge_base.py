@@ -8,6 +8,8 @@ class Knowledgebase(BaseModel):
     name : str
     description : str
     status : str
+    visibility: str = "private"
+    public_share_token: str | None = None
     document_limit : int 
     created_at : datetime
     document_count: int = 0

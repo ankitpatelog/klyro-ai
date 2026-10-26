@@ -1,8 +1,16 @@
+from pathlib import Path
 from typing import Literal
 from urllib.parse import urlparse
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+# Resolve configuration from the backend directory, rather than the process
+# working directory. This keeps API, worker, and public-share deployments on
+# the same database and Qdrant collection even when they are started from the
+# repository root or a process manager.
+_BACKEND_ENV_FILE = Path(__file__).resolve().parents[2] / ".env"
 
 
 class Settings(BaseSettings):
@@ -64,7 +72,7 @@ class Settings(BaseSettings):
                 return f"https://{host.removeprefix('db.')}"
         return value
 
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(env_file=_BACKEND_ENV_FILE, env_file_encoding="utf-8", extra="ignore")
 
 
 settings = Settings()

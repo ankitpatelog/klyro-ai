@@ -73,7 +73,7 @@ export default function KnowledgeBaseChatPage() {
       setMessages(historyResponse.data || []);
     } catch (error) {
       if (error.response?.status === 409) {
-        toast.error("Upload and finish embedding at least 2 documents before chatting.");
+        toast.error("Upload and finish embedding at least 1 document before chatting.");
       } else {
         toast.error("Unable to load this knowledge base chat.");
       }
@@ -142,7 +142,7 @@ export default function KnowledgeBaseChatPage() {
   }
 
   const completedDocuments = (knowledgeBase?.documents || []).filter((document) => document.status === "completed").length;
-  const isReady = completedDocuments >= 2;
+  const isReady = completedDocuments >= 1;
 
   return (
     <section className="mx-auto flex h-[calc(100dvh-9rem)] min-h-[36rem] max-w-5xl flex-col pb-8">
@@ -151,7 +151,7 @@ export default function KnowledgeBaseChatPage() {
           <ArrowLeft size={15} /> Back to {knowledgeBase?.name || "Knowledge Base"}
         </Link>
         <span className={`rounded-full px-3 py-1 text-xs font-medium ${isReady ? "bg-[#e6f4ea] text-[#137333]" : "bg-[#fff0e6] text-[#bc7651]"}`}>
-          {isReady ? `${completedDocuments} documents ready` : `${completedDocuments}/2 documents ready`}
+          {isReady ? `${completedDocuments} document${completedDocuments === 1 ? "" : "s"} ready` : "1 document needed"}
         </span>
       </div>
 
@@ -169,7 +169,7 @@ export default function KnowledgeBaseChatPage() {
             <div className="mx-auto mt-12 max-w-md rounded-2xl border border-dashed border-[#d6cffa] bg-white p-7 text-center">
               <FileText className="mx-auto mb-3 text-[#8172d8]" size={30} />
               <h2 className="font-medium text-[#273045]">Chat will be ready soon</h2>
-              <p className="mt-2 text-sm leading-6 text-[#6d7484]">Upload and finish embedding at least two documents in this knowledge base before asking questions.</p>
+              <p className="mt-2 text-sm leading-6 text-[#6d7484]">Upload and finish embedding at least one document in this knowledge base before asking questions.</p>
             </div>
           ) : messages.length === 0 ? (
             <div className="mx-auto mt-12 max-w-md text-center">
@@ -224,7 +224,7 @@ export default function KnowledgeBaseChatPage() {
 
         <form onSubmit={sendQuestion} className="border-t border-[#f0eee9] bg-white p-4 sm:p-5">
           <div className="flex items-end gap-3 rounded-2xl border border-[#d9d6d0] bg-[#fffefa] p-2 focus-within:border-[#8172d8]">
-            <textarea value={question} onChange={(event) => setQuestion(event.target.value)} disabled={!isReady || isSending} rows={2} placeholder={isReady ? "Ask about this knowledge base..." : "Complete two document embeddings to enable chat"} className="min-h-12 flex-1 resize-none bg-transparent px-2 py-1 text-sm text-[#273045] outline-none placeholder:text-[#a4a49b] disabled:cursor-not-allowed" />
+            <textarea value={question} onChange={(event) => setQuestion(event.target.value)} disabled={!isReady || isSending} rows={2} placeholder={isReady ? "Ask about this knowledge base..." : "Complete one document embedding to enable chat"} className="min-h-12 flex-1 resize-none bg-transparent px-2 py-1 text-sm text-[#273045] outline-none placeholder:text-[#a4a49b] disabled:cursor-not-allowed" />
             <button type="submit" disabled={!isReady || isSending || !question.trim()} className="inline-flex h-10 w-10 items-center justify-center rounded-xl bg-[#8172d8] text-white transition hover:bg-[#6658bb] disabled:cursor-not-allowed disabled:opacity-40" aria-label="Send question">
               {isSending ? <Loader2 size={17} className="animate-spin" /> : <Send size={17} />}
             </button>

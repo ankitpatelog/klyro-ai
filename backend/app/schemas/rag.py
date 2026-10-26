@@ -4,14 +4,23 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class RagQuestionRequest(BaseModel):
-    knowledge_base_id: UUID
+    knowledge_base_id: UUID | None = None
+    share_token: str | None = Field(default=None, min_length=1, max_length=200)
     question: str = Field(min_length=1, max_length=4_000)
     conversation_id: UUID | None = None
-    stream: bool = True
+    stream: bool = False
+
+    @model_validator(mode="after")
+    def require_exactly_one_access_scope(self) -> "RagQuestionRequest":
+        if (self.knowledge_base_id is None) == (self.share_token is None):
+            raise ValueError("Provide exactly one of knowledge_base_id or share_token")
+        if self.share_token and self.conversation_id:
+            raise ValueError("Public shared chat cannot use a stored conversation")
+        return self
 
 
 class Citation(BaseModel):

@@ -8,6 +8,7 @@ turns off jailbreak protection.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from dataclasses import dataclass
 from functools import lru_cache
@@ -67,6 +68,11 @@ def _get_rails():
     try:
         from nemoguardrails import LLMRails, RailsConfig
 
+        # Pydantic reads backend/.env for application settings, but it does not
+        # export those values into os.environ. NeMo resolves api_key_env_var
+        # directly from os.environ, so make the configured key available before
+        # creating its NIM clients.
+        os.environ.setdefault("NVIDIA_API_KEY", settings.NVIDIA_API_KEY)
         config_dir = Path(__file__).resolve().parents[1] / "guardrails"
         configured = Path(settings.NEMO_GUARDRAILS_CONFIG_PATH)
         if configured.is_absolute():
@@ -79,7 +85,7 @@ def _get_rails():
         return None
 
 
-async def _nemo_check(messages: list[dict[str, str]]) -> SafetyDecision | None:
+async def _nemo_check(messages: list[dict[str, str]], *, original_content: str) -> SafetyDecision | None:
     rails = _get_rails()
     if rails is None:
         return None
@@ -87,7 +93,11 @@ async def _nemo_check(messages: list[dict[str, str]]) -> SafetyDecision | None:
         result = await rails.check_async(messages)
         if str(result.status).upper().endswith("BLOCKED"):
             return SafetyDecision(False, "", "nemo_guardrails_blocked")
-        return SafetyDecision(True, str(result.content))
+        # NeMo's check call can return the classifier's own generated text (and,
+        # on some providers, a refusal-like message) even when the safety rail
+        # allowed the request. That text is not the user's question or the RAG
+        # answer, so never replace the original content with it.
+        return SafetyDecision(True, original_content)
     except Exception:
         # Do not break RAG availability when a remote classifier is temporarily down.
         logger.exception("NeMo Guardrails check failed; using local safety rules")
@@ -98,7 +108,7 @@ async def check_input_safety(question: str) -> SafetyDecision:
     """Run deterministic jailbreak checks, then NeMo input rails."""
     return _local_check(question, direction="input") or await _nemo_check([
         {"role": "user", "content": question}
-    ]) or SafetyDecision(True, question)
+    ], original_content=question) or SafetyDecision(True, question)
 
 
 async def check_output_safety(question: str, answer: str) -> SafetyDecision:
@@ -106,4 +116,4 @@ async def check_output_safety(question: str, answer: str) -> SafetyDecision:
     return _local_check(answer, direction="output") or await _nemo_check([
         {"role": "user", "content": question},
         {"role": "assistant", "content": answer},
-    ]) or SafetyDecision(True, answer)
+    ], original_content=answer) or SafetyDecision(True, answer)

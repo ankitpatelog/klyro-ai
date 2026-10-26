@@ -56,7 +56,7 @@ async def _direct_generation_fallback(messages: list[dict[str, str]]) -> str:
             provider, _, model_name = model.partition("/")
             if provider != "groq" or not model_name:
                 raise RuntimeError("Install LiteLLM to use a non-Groq fallback model")
-            response = await client.post(url, headers=headers, json={"model": model_name, "messages": messages, "temperature": 0.1})
+            response = await client.post(url, headers=headers, json={"model": model_name, "messages": messages, "temperature": 0})
             try:
                 response.raise_for_status()
             except httpx.HTTPStatusError as exc:
@@ -78,7 +78,9 @@ async def generate_chat_completion(messages: list[dict[str, str]]) -> str:
     response = await get_generation_router().acompletion(
         model="rag-primary",
         messages=messages,
-        temperature=0.1,
+        # Identical knowledge-base, question, and evidence should produce the
+        # same answer regardless of which chat surface sent the request.
+        temperature=0,
         timeout=settings.LITELLM_TIMEOUT_SECONDS,
     )
     content = response.choices[0].message.content

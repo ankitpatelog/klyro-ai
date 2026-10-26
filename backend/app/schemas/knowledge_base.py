@@ -31,6 +31,7 @@ class KnowledgeBaseUpdate(BaseModel):
     description: str | None = Field(default=None, max_length=2_000)
     status: str | None = Field(default=None, min_length=1, max_length=50)
     document_limit: int | None = Field(default=None, ge=1, le=10_000)
+    visibility: str | None = Field(default=None, pattern="^(private|public)$")
 
     @field_validator("name", "status")
     @classmethod
@@ -54,6 +55,8 @@ class KnowledgeBaseResponse(BaseModel):
     name: str
     description: str
     status: str
+    visibility: str = "private"
+    public_share_token: str | None = None
     document_limit: int
     created_at: datetime
     document_count: int = 0
@@ -61,3 +64,22 @@ class KnowledgeBaseResponse(BaseModel):
 
 class KnowledgeBaseDetailResponse(KnowledgeBaseResponse):
     documents: list[DocumentResponse] = Field(default_factory=list)
+
+
+class PublicKnowledgeBaseResponse(BaseModel):
+    name: str
+    description: str
+
+
+class PublicKnowledgeBaseDirectoryItem(BaseModel):
+    id: uuid.UUID
+    name: str
+    description: str
+    author_name: str
+    public_share_token: str
+    document_count: int = 0
+    created_at: datetime
+
+
+class PublicShareLinkResponse(BaseModel):
+    public_share_token: str

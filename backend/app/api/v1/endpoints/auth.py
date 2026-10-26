@@ -1,18 +1,19 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, Security, status
+from sqlalchemy import text
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.redis import get_redis
-from app.core.security import decode_token, token_hash
+from app.core.security import decode_token, hash_password, token_hash, verify_password
 from app.db.session import get_db
 from app.models.user import User
 from app.repositories.token_sessions import is_access_token_active
 from app.repositories.users import get_user_by_id
-from app.schemas.auth import LoginRequest, RefreshRequest, RegisterRequest, RegisterResponse, TokenResponse
+from app.schemas.auth import ConfirmAccountActionRequest, LoginRequest, ProfileUpdateRequest, RefreshRequest, RegisterRequest, RegisterResponse, TokenResponse
 from app.services.auth_service import login_user, logout_user, refresh_user_tokens, register_user
 
 
@@ -182,3 +183,77 @@ async def me(current_user: User = Depends(get_current_user)):
         email_verified_at=current_user.email_verified_at,
         created_at=current_user.created_at,
     )
+
+
+@router.patch("/account/profile")
+async def update_profile(
+    payload: ProfileUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    if payload.new_password and not payload.current_password:
+        raise HTTPException(status_code=422, detail="Current password is required to set a new password")
+    if payload.current_password and not verify_password(payload.current_password, current_user.password_hash):
+        raise HTTPException(status_code=401, detail="Current password is incorrect")
+    changes: dict[str, str | None] = {}
+    if payload.full_name is not None:
+        changes["full_name"] = payload.full_name.strip()
+    if payload.email is not None:
+        changes["email"] = str(payload.email).lower()
+    if payload.avatar_url is not None:
+        changes["avatar_url"] = payload.avatar_url.strip() or None
+    if payload.new_password:
+        changes["password_hash"] = hash_password(payload.new_password)
+    if not changes:
+        raise HTTPException(status_code=422, detail="No profile changes supplied")
+    try:
+        assignments = ", ".join(f"{column} = :{column}" for column in changes)
+        row = await db.execute(text(f"""
+            UPDATE users SET {assignments} WHERE id = :id
+            RETURNING id, email, full_name, avatar_url, created_at
+        """), {**changes, "id": str(current_user.id)})
+        await db.commit()
+    except Exception as exc:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="That email address is already in use") from exc
+    return dict(row.mappings().one())
+
+
+@router.get("/account/usage")
+async def account_usage(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    user_id = str(current_user.id)
+    row = await db.execute(text("""
+        SELECT
+          (SELECT COUNT(*) FROM knowledgebases WHERE user_id = :user_id) AS knowledge_base_count,
+          (SELECT COUNT(*) FROM documents WHERE user_id = :user_id) AS document_count,
+          (SELECT COALESCE(SUM(file_size), 0) FROM documents WHERE user_id = :user_id) AS storage_bytes,
+          (SELECT COUNT(*) FROM rag_traces WHERE user_id = :user_id) AS chat_request_count
+    """), {"user_id": user_id})
+    usage = dict(row.mappings().one())
+    usage["rate_limit_per_minute"] = settings.RAG_USER_REQUESTS_PER_MINUTE
+    return usage
+
+
+@router.get("/account/export")
+async def export_account_data(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    user_id = str(current_user.id)
+    bases = await db.execute(text("SELECT id, name, description, visibility, created_at FROM knowledgebases WHERE user_id = :user_id ORDER BY created_at"), {"user_id": user_id})
+    documents = await db.execute(text("SELECT knowledge_base_id, filename, file_size, status, created_at FROM documents WHERE user_id = :user_id ORDER BY created_at"), {"user_id": user_id})
+    return {"profile": {"id": user_id, "email": current_user.email, "full_name": current_user.full_name}, "knowledge_bases": [dict(row) for row in bases.mappings().all()], "documents": [dict(row) for row in documents.mappings().all()]}
+
+
+@router.delete("/account/knowledge-bases", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_all_knowledge_bases(payload: ConfirmAccountActionRequest, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    if payload.confirmation != "DELETE BASES" or not verify_password(payload.current_password, current_user.password_hash):
+        raise HTTPException(status_code=400, detail="Confirmation or password is incorrect")
+    await db.execute(text("DELETE FROM knowledgebases WHERE user_id = :user_id"), {"user_id": str(current_user.id)})
+    await db.commit()
+
+
+@router.delete("/account", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_account(payload: ConfirmAccountActionRequest, response: Response, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    if payload.confirmation != "DELETE ACCOUNT" or not verify_password(payload.current_password, current_user.password_hash):
+        raise HTTPException(status_code=400, detail="Confirmation or password is incorrect")
+    await db.execute(text("DELETE FROM users WHERE id = :id"), {"id": str(current_user.id)})
+    await db.commit()
+    _clear_auth_cookies(response)

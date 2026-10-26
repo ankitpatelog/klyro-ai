@@ -6,9 +6,12 @@ prompts:
       illegal weapons, controlled substances, self-harm, hate, privacy invasion,
       threats, fraud, malware, or illegal activity.
       User: {{ user_input }}
-      Reply only as JSON: {"User Safety": "safe" or "unsafe"}.
+      Reply with exactly one JSON object and nothing else: {"User Safety":"safe"} or {"User Safety":"unsafe"}.
     output_parser: nemoguard_parse_prompt_safety
-    max_tokens: 50
+    # The NIM safety model may include categories despite the compact-response
+    # instruction. A 12 or 50 token cap can truncate that JSON, which NeMo then
+    # treats as a blocked request. Leave ample room for a complete verdict.
+    max_tokens: 128
 
   - task: content_safety_check_output $model=content_safety
     content: |
@@ -18,6 +21,9 @@ prompts:
       threats, fraud, malware, or illegal activity.
       User: {{ user_input }}
       Assistant: {{ bot_response }}
-      Reply only as JSON: {"Response Safety": "safe" or "unsafe"}.
-    output_parser: nemoguard_parse_response_safety
-    max_tokens: 50
+      Reply with exactly one JSON object and nothing else: {"User Safety":"safe"} or {"User Safety":"unsafe"}.
+    # Nemotron returns the standard "User Safety" field for both input and
+    # output moderation. Using the response-specific parser turns safe answers
+    # into false blocks because it looks for a non-existent "Response Safety" field.
+    output_parser: nemoguard_parse_prompt_safety
+    max_tokens: 128
