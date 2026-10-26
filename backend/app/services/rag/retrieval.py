@@ -41,6 +41,13 @@ def _terms(value: str) -> set[str]:
     return {term for term in re.findall(r"[a-z0-9]{2,}", value.lower())}
 
 
+_RERANK_STOP_WORDS = {"about", "and", "are", "for", "from", "how", "in", "is", "of", "the", "to", "what", "with"}
+
+
+def _intent_terms(value: str) -> set[str]:
+    return _terms(value) - _RERANK_STOP_WORDS
+
+
 def _qdrant_points(response_body: dict[str, Any]) -> list[dict[str, Any]]:
     """Normalize Qdrant search and scroll responses across supported versions."""
     result = response_body.get("result", [])
@@ -92,6 +99,7 @@ class QdrantHybridRetriever(BaseRetriever):
     user_id: str
     knowledge_base_id: str
     limit: int = Field(default=settings.RAG_RETRIEVAL_LIMIT)
+    query_vector: list[float] | None = None
 
     _embeddings: QdrantEmbeddings = PrivateAttr()
 
@@ -106,7 +114,7 @@ class QdrantHybridRetriever(BaseRetriever):
     async def _aget_relevant_documents(
         self, query: str, *, run_manager: CallbackManagerForRetrieverRun
     ) -> list[Document]:
-        vector = await self._embeddings.aembed_query(query)
+        vector = self.query_vector or await self._embeddings.aembed_query(query)
         base = settings.QDRANT_URL.rstrip("/")
         filters = _filter(self.user_id, self.knowledge_base_id)
         async with httpx.AsyncClient(timeout=45) as client:
@@ -193,12 +201,15 @@ async def embed_query(query: str) -> list[float]:
     return await QdrantEmbeddings().aembed_query(query)
 
 
-async def retrieve_hybrid(query: str, *, user_id: str, knowledge_base_id: str) -> list[dict[str, Any]]:
+async def retrieve_hybrid(
+    query: str, *, user_id: str, knowledge_base_id: str, query_vector: list[float] | None = None
+) -> list[dict[str, Any]]:
     """Combine dense Qdrant search with a lexical score over the same authorized payloads."""
     retriever = QdrantHybridRetriever(
         user_id=user_id,
         knowledge_base_id=knowledge_base_id,
         limit=settings.RAG_RETRIEVAL_LIMIT,
+        query_vector=query_vector,
     )
     # BaseRetriever exposes async retrieval through ``ainvoke``. It dispatches
     # to this retriever's ``_aget_relevant_documents`` implementation.
@@ -217,12 +228,24 @@ async def retrieve_hybrid(query: str, *, user_id: str, knowledge_base_id: str) -
 
 
 def rerank(query: str, candidates: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Lightweight lexical reranker. Replace this node with a cross-encoder when one is configured."""
-    query_terms = _terms(query)
-    ranked = []
+    """Prioritize chunks matching the query's distinctive terms, then RRF rank."""
+    query_terms = _intent_terms(query) or _terms(query)
+    candidate_terms = []
+    document_frequency = {term: 0 for term in query_terms}
     for candidate in candidates:
-        text = str(candidate["payload"].get("text", ""))
-        overlap = len(query_terms & _terms(text)) / max(1, len(query_terms))
-        candidate["rerank_score"] = candidate["rrf"] + overlap
+        payload = candidate["payload"]
+        terms = _terms(f"{payload.get('section_heading', '')} {payload.get('text', '')}")
+        candidate_terms.append(terms)
+        for term in query_terms:
+            document_frequency[term] += int(term in terms)
+
+    ranked = []
+    for candidate, terms in zip(candidates, candidate_terms):
+        # Rare query terms such as "placement" and "fees" carry more intent
+        # than a common organization name that appears in every chunk.
+        lexical_score = sum(
+            1 / max(1, document_frequency[term]) for term in query_terms if term in terms
+        ) / max(1, len(query_terms))
+        candidate["rerank_score"] = candidate["rrf"] + lexical_score
         ranked.append(candidate)
     return sorted(ranked, key=lambda item: item["rerank_score"], reverse=True)[:settings.RAG_RERANK_LIMIT]

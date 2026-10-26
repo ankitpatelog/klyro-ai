@@ -45,7 +45,9 @@ class Settings(BaseSettings):
     LITELLM_TIMEOUT_SECONDS: int = 90
     LITELLM_COOLDOWN_SECONDS: int = 30
     NVIDIA_API_KEY: str = ""
-    NEMO_GUARDRAILS_ENABLED: bool = True
+    # Remote safety classifiers can be enabled explicitly after evaluating
+    # their false-positive rate for the application's domain.
+    NEMO_GUARDRAILS_ENABLED: bool = False
     NEMO_GUARDRAILS_CONFIG_PATH: str = "app/guardrails"
     RAG_RETRIEVAL_LIMIT: int = 24
     RAG_RERANK_LIMIT: int = 8
@@ -53,8 +55,14 @@ class Settings(BaseSettings):
     RAG_CONTEXT_TOKEN_BUDGET: int = 3_000
     RAG_HISTORY_TOKEN_BUDGET: int = 500
     RAG_HISTORY_RECENT_MESSAGES: int = 4
+    RAG_HISTORY_SUMMARY_SOURCE_TOKEN_BUDGET: int = 1_500
+    RAG_HISTORY_SUMMARY_TARGET_TOKENS: int = 200
     RAG_CACHE_TTL_SECONDS: int = 600
     RAG_CACHE_SIMILARITY: float = 0.88
+    # Optional provider pricing for observability. Leave at zero when pricing is
+    # unknown or bundled into the provider plan; the dashboard will show $0.
+    RAG_INPUT_COST_PER_MILLION_TOKENS: float = 0.0
+    RAG_OUTPUT_COST_PER_MILLION_TOKENS: float = 0.0
     RAG_USER_REQUESTS_PER_MINUTE: int = 10
     RAG_GENERATION_MAX_RETRIES: int = 2
     RAG_CIRCUIT_BREAKER_SECONDS: int = 30

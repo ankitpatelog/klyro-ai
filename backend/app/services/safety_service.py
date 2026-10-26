@@ -1,8 +1,8 @@
 """Content safety and jailbreak protection for the RAG boundary.
 
-NeMo Guardrails is used when configured with an NVIDIA API key. A small,
-fail-safe local policy remains active so an unavailable guardrail provider never
-turns off jailbreak protection.
+The local policy blocks direct jailbreak attempts and clearly harmful requests.
+Optional remote NeMo moderation is disabled by default because knowledge-base
+questions such as URLs, fees, contacts, and placements must not be false-blocked.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 REFUSAL = "I can't help with that request. Please ask a safe, knowledge-base-related question."
 
 # These catch direct attempts to make the RAG prompt or its retrieved documents
-# override the application policy. NeMo then handles less obvious adversarial text.
+# override the application policy.
 JAILBREAK_PATTERNS = (
     r"\bignore (all |any |the )?(previous|prior|above|system) (instructions|rules|prompt)\b",
     r"\b(disregard|override|bypass) (the )?(system|safety|guardrails?|instructions?)\b",
@@ -105,14 +105,14 @@ async def _nemo_check(messages: list[dict[str, str]], *, original_content: str) 
 
 
 async def check_input_safety(question: str) -> SafetyDecision:
-    """Run deterministic jailbreak checks, then NeMo input rails."""
+    """Run narrow local checks; remote NeMo is opt-in through configuration."""
     return _local_check(question, direction="input") or await _nemo_check([
         {"role": "user", "content": question}
     ], original_content=question) or SafetyDecision(True, question)
 
 
 async def check_output_safety(question: str, answer: str) -> SafetyDecision:
-    """Run NeMo output rails before the answer is stored or streamed to the user."""
+    """Run local output checks; remote NeMo remains opt-in."""
     return _local_check(answer, direction="output") or await _nemo_check([
         {"role": "user", "content": question},
         {"role": "assistant", "content": answer},

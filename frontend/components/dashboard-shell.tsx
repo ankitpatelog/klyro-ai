@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Menu, X, FolderOpen, LayoutDashboard, Settings, Sparkles, Globe2, LogOut } from "lucide-react";
+import { Menu, X, FolderOpen, LayoutDashboard, Settings, Sparkles, Globe2, LogOut, Activity } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import axios from "axios";
 import { useRouter } from "next/navigation";
@@ -13,6 +13,7 @@ const navigation = [
   { href: "/dashboard", label: "Overview", icon: LayoutDashboard, exact: true },
   { href: "/dashboard/knowledge-base", label: "Knowledge bases", icon: FolderOpen },
   { href: "/dashboard/public-knowledge-bases", label: "Public directory", icon: Globe2 },
+  { href: "/dashboard/observability", label: "Observability", icon: Activity },
   { href: "/dashboard/settings", label: "Settings", icon: Settings },
 ];
 

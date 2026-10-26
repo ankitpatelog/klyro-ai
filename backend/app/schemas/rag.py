@@ -46,3 +46,16 @@ class RagAnswerResponse(BaseModel):
     status: Literal["answered", "clarification", "abstained", "failed"]
     termination_reason: str
     created_at: datetime
+
+
+class RagObservabilityResponse(BaseModel):
+    window_days: int
+    request_count: int
+    total_tokens: int
+    input_tokens: int
+    output_tokens: int
+    estimated_cost_usd: float
+    average_latency_ms: int
+    cache_hit_rate: float
+    average_retrieved_chunks: float
+    models: list[dict[str, object]] = Field(default_factory=list)

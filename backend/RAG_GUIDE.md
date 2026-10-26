@@ -16,6 +16,12 @@ Each authenticated user has an ongoing RAG conversation for each knowledge base.
 
 The chat API is available only when that knowledge base has at least **two documents with `status = completed`**. Uploaded or processing documents do not count, because their vectors are not ready to retrieve. Before then, the history and question endpoints return `409 Conflict` with a clear readiness message.
 
+## Production optimizations and observability
+
+The worker stores contextual chunk metadata (`document_id`, filename, chunk index, and nearest section heading). Answering uses dense and keyword retrieval fused with reciprocal-rank fusion, followed by reranking. The prompt receives only the highest-ranked chunks that fit the configured context-token budget. Older turns are summarized by the generation model into a capped memory while recent turns remain verbatim. Redis caches answers per knowledge base for exact or embedding-similar repeat questions; the cache-query embedding is reused for retrieval on a miss.
+
+`GET /rag/observability?days=30` is owner-scoped and reports request count, input/output tokens, estimated cost, average latency, cache-hit rate, average retrieved chunks, and the models recorded in traces. Set `RAG_*_COST_PER_MILLION_TOKENS` if you want cost estimates for your provider.
+
 ## Files
 
 - `app/services/rag/workflow.py`: graph nodes and state.

@@ -78,3 +78,26 @@ async def save_trace(
               "knowledge_base_id": knowledge_base_id, "status": status, "termination_reason": termination_reason,
               "latency_ms": latency_ms, "input_tokens": input_tokens, "output_tokens": output_tokens,
               "metadata": json.dumps(metadata), "error": error})
+
+
+async def observability_summary(db: AsyncSession, *, user_id: str, days: int) -> dict[str, Any]:
+    """Return aggregate RAG metrics for one owner without exposing trace content."""
+    summary = await db.execute(text("""
+        SELECT
+            COUNT(*)::int AS request_count,
+            COALESCE(SUM(input_tokens + output_tokens), 0)::int AS total_tokens,
+            COALESCE(SUM(input_tokens), 0)::int AS input_tokens,
+            COALESCE(SUM(output_tokens), 0)::int AS output_tokens,
+            COALESCE(ROUND(AVG(latency_ms))::int, 0) AS average_latency_ms,
+            COALESCE(ROUND(100.0 * AVG(CASE WHEN metadata ->> 'cache_hit' = 'true' THEN 1 ELSE 0 END), 1), 0) AS cache_hit_rate,
+            COALESCE(ROUND(AVG(COALESCE((metadata ->> 'evidence_count')::int, 0)), 1), 0) AS average_retrieved_chunks
+        FROM rag_traces
+        WHERE user_id = :user_id AND created_at >= NOW() - (:days * INTERVAL '1 day')
+    """), {"user_id": user_id, "days": days})
+    models = await db.execute(text("""
+        SELECT COALESCE(NULLIF(metadata ->> 'model_used', ''), 'not recorded') AS model, COUNT(*)::int AS requests
+        FROM rag_traces
+        WHERE user_id = :user_id AND created_at >= NOW() - (:days * INTERVAL '1 day')
+        GROUP BY 1 ORDER BY requests DESC
+    """), {"user_id": user_id, "days": days})
+    return {**dict(summary.mappings().one()), "models": [dict(row) for row in models.mappings().all()]}

@@ -45,7 +45,7 @@ def get_generation_router():
     )
 
 
-async def _direct_generation_fallback(messages: list[dict[str, str]]) -> str:
+async def _direct_generation_fallback(messages: list[dict[str, str]], *, max_tokens: int | None = None) -> str:
     """Temporary compatibility path used only when LiteLLM is unavailable locally."""
     models = [settings.LITELLM_PRIMARY_MODEL, *_configured_fallback_models()]
     last_error: httpx.HTTPStatusError | None = None
@@ -56,7 +56,10 @@ async def _direct_generation_fallback(messages: list[dict[str, str]]) -> str:
             provider, _, model_name = model.partition("/")
             if provider != "groq" or not model_name:
                 raise RuntimeError("Install LiteLLM to use a non-Groq fallback model")
-            response = await client.post(url, headers=headers, json={"model": model_name, "messages": messages, "temperature": 0})
+            body: dict[str, object] = {"model": model_name, "messages": messages, "temperature": 0}
+            if max_tokens is not None:
+                body["max_tokens"] = max_tokens
+            response = await client.post(url, headers=headers, json=body)
             try:
                 response.raise_for_status()
             except httpx.HTTPStatusError as exc:
@@ -68,22 +71,29 @@ async def _direct_generation_fallback(messages: list[dict[str, str]]) -> str:
     raise last_error or RuntimeError("No configured generation model returned an answer")
 
 
-async def generate_chat_completion(messages: list[dict[str, str]]) -> str:
+async def generate_chat_completion_with_model(
+    messages: list[dict[str, str]], *, max_tokens: int | None = None
+) -> tuple[str, str]:
     """Generate through the primary model, falling back only on router-eligible failures."""
     if not settings.GROQ_API_KEY:
         raise RuntimeError("GROQ_API_KEY is not configured")
     if Router is None:
         logger.warning("LiteLLM is not installed; using the temporary direct Groq compatibility path")
-        return await _direct_generation_fallback(messages)
-    response = await get_generation_router().acompletion(
-        model="rag-primary",
-        messages=messages,
-        # Identical knowledge-base, question, and evidence should produce the
-        # same answer regardless of which chat surface sent the request.
-        temperature=0,
-        timeout=settings.LITELLM_TIMEOUT_SECONDS,
-    )
+        return await _direct_generation_fallback(messages, max_tokens=max_tokens), settings.LITELLM_PRIMARY_MODEL
+    request: dict[str, object] = {
+        "model": "rag-primary", "messages": messages, "temperature": 0,
+        "timeout": settings.LITELLM_TIMEOUT_SECONDS,
+    }
+    if max_tokens is not None:
+        request["max_tokens"] = max_tokens
+    response = await get_generation_router().acompletion(**request)
     content = response.choices[0].message.content
     if not content:
         raise RuntimeError("Generation provider returned an empty response")
-    return str(content).strip()
+    return str(content).strip(), str(getattr(response, "model", None) or settings.LITELLM_PRIMARY_MODEL)
+
+
+async def generate_chat_completion(messages: list[dict[str, str]]) -> str:
+    """Backward-compatible text-only generation interface."""
+    content, _ = await generate_chat_completion_with_model(messages)
+    return content

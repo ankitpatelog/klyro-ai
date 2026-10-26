@@ -6,7 +6,7 @@ import time
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, Security
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, Security
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials
 from redis.asyncio import Redis
@@ -19,8 +19,8 @@ from app.core.redis import get_redis
 from app.models.user import User
 from app.repositories.document import completed_document_count
 from app.repositories.knowledge_bases import get_knowledge_base, get_public_knowledge_base
-from app.repositories.rag import add_message, conversation_messages, get_or_create_conversation, recent_messages, save_trace
-from app.schemas.rag import RagAnswerResponse, RagMessageResponse, RagQuestionRequest
+from app.repositories.rag import add_message, conversation_messages, get_or_create_conversation, observability_summary, recent_messages, save_trace
+from app.schemas.rag import RagAnswerResponse, RagMessageResponse, RagObservabilityResponse, RagQuestionRequest
 from app.services.rag.workflow import RagState, run_workflow
 
 router = APIRouter()
@@ -40,7 +40,7 @@ async def _persist(db: AsyncSession, state: RagState) -> None:
                      metadata={"rewritten_query": state.rewritten_query, "candidate_count": len(state.candidates),
                                "evidence_count": len(state.evidence), "context_tokens": state.context_tokens,
                                "history_tokens": state.history_tokens, "cache_hit": state.cache_hit,
-                               "retry_count": state.retries}, error=state.error)
+                               "retry_count": state.retries, "model_used": state.model_used}, error=state.error)
     await db.commit()
 
 
@@ -125,6 +125,23 @@ async def get_knowledge_base_conversation(
     )
     await db.commit()
     return messages
+
+
+@router.get("/observability", response_model=RagObservabilityResponse)
+async def get_observability(
+    days: int = Query(default=30, ge=1, le=90),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """Owner-scoped aggregate RAG metrics for the optimization dashboard."""
+    metrics = await observability_summary(db, user_id=str(current_user.id), days=days)
+    metrics["window_days"] = days
+    metrics["estimated_cost_usd"] = round(
+        (metrics["input_tokens"] * settings.RAG_INPUT_COST_PER_MILLION_TOKENS
+         + metrics["output_tokens"] * settings.RAG_OUTPUT_COST_PER_MILLION_TOKENS) / 1_000_000,
+        6,
+    )
+    return metrics
 
 
 @router.post("/questions", response_model=RagAnswerResponse)
