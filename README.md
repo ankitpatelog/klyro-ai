@@ -54,6 +54,10 @@ uvicorn app.main:app --reload
 
 
 
+cd D:\klyro-ai\backend
+.\kyro\Scripts\activate
+uvicorn app.main:app --reload
+
 
 
 

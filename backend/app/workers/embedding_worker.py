@@ -45,7 +45,7 @@ def _supabase_headers() -> dict[str, str]:
     return headers
 
 
-def _require_settings() -> None:
+def validate_worker_settings() -> None:
     missing = [name for name, value in {
         "SUPABASE_URL": settings.SUPABASE_URL,
         "SUPABASE_SERVICE_ROLE_KEY": settings.SUPABASE_SERVICE_ROLE_KEY,
@@ -229,8 +229,9 @@ async def process_job(redis, document_id: str) -> None:
         await _publish(redis, document_id, "failed", 0, stage="failed", message="Document processing failed", error_message=message)
 
 
-async def main() -> None:
-    # _require_settings()
+async def run_worker() -> None:
+    """Run the Redis embedding loop in either a standalone process or FastAPI."""
+    validate_worker_settings()
     redis = create_redis_client()
     await redis.ping()
     logger.info("Embedding worker started; waiting on %s", QUEUE_NAME)
@@ -268,4 +269,4 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-    asyncio.run(main())
+    asyncio.run(run_worker())

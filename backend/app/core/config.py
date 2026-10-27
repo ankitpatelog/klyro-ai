@@ -66,6 +66,9 @@ class Settings(BaseSettings):
     RAG_USER_REQUESTS_PER_MINUTE: int = 10
     RAG_GENERATION_MAX_RETRIES: int = 2
     RAG_CIRCUIT_BREAKER_SECONDS: int = 30
+    # For a single-service deployment, the API starts the Redis embedding loop.
+    # Set false only when deploying the worker as a separate service.
+    RUN_EMBEDDING_WORKER: bool = True
     SMTP_HOST: str = ""
     SMTP_PORT: int = 587
     SMTP_USERNAME: str = ""

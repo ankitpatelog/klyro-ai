@@ -1,5 +1,6 @@
 
-from contextlib import asynccontextmanager
+import asyncio
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -7,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.router import api_router
 from app.core.config import settings
 from app.core.redis import create_redis_client
+from app.workers.embedding_worker import run_worker, validate_worker_settings
 
 
 @asynccontextmanager
@@ -16,9 +18,17 @@ async def lifespan(_: FastAPI):
     app_redis = create_redis_client()
     await app_redis.ping()
     app.state.redis = app_redis
+    worker_task = None
+    if settings.RUN_EMBEDDING_WORKER:
+        validate_worker_settings()
+        worker_task = asyncio.create_task(run_worker(), name="embedding-worker")
     try:
         yield
     finally:
+        if worker_task:
+            worker_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await worker_task
         await app_redis.aclose()
 
 app = FastAPI(
