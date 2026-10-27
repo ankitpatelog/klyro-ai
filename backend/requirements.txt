@@ -15,5 +15,6 @@ httpx
 python-multipart
 pypdf
 litellm
+langchain-core==1.6.13
 nemoguardrails[nvidia]>=0.24.0,<0.25.0
 
