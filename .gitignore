@@ -2,6 +2,16 @@
 .env
 .env.*
 !.env.example
+!.env.*.example
+
+# Deployment tooling and local credentials
+.vercel/
+.railway/
+*.p8
+*.p12
+*.crt
+*.cer
+*.jks
 
 # Python
 __pycache__/
