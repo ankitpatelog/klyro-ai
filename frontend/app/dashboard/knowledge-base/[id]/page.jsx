@@ -155,6 +155,8 @@ export default function KnowledgeBaseDetailPage() {
       if (axios.isAxiosError(error) && error.response?.status === 403) {
         toast.error(error.response.data?.detail || "Verify your email before uploading.", { id: toastId });
         router.push("/verify-email");
+      } else if (axios.isAxiosError(error) && error.response?.status === 422) {
+        toast.error(error.response.data?.detail || "Unsupported file format.", { id: toastId });
       } else {
         toast.error("Failed to upload document.", { id: toastId });
       }
@@ -348,7 +350,20 @@ export default function KnowledgeBaseDetailPage() {
                 <input
                   id="file-upload-input"
                   type="file"
-                  onChange={(e) => setSelectedFile(e.target.files ? e.target.files[0] : null)}
+                  accept=".pdf,.txt,.md,.markdown,.csv"
+                  onChange={(e) => {
+                    const file = e.target.files ? e.target.files[0] : null;
+                    if (file) {
+                      const extension = file.name.split(".").pop().toLowerCase();
+                      const acceptedExtensions = ["pdf", "txt", "md", "markdown", "csv"];
+                      if (!acceptedExtensions.includes(extension)) {
+                        toast.error(`Unsupported file format. Supported formats are PDF, TXT, Markdown, and CSV.`);
+                        e.target.value = "";
+                        return;
+                      }
+                    }
+                    setSelectedFile(file);
+                  }}
                   className="hidden"
                 />
                 <label
@@ -362,7 +377,7 @@ export default function KnowledgeBaseDetailPage() {
                     {selectedFile ? selectedFile.name : "Click to browse or drag file here"}
                   </p>
                   <p className="mt-2 text-xs text-[#6d7484]">
-                    Supports PDF, TXT, DOCX, MD, etc.
+                    Supports PDF, TXT, MD, Markdown, and CSV
                   </p>
                 </label>
               </div>

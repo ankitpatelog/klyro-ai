@@ -12,7 +12,7 @@ import { apiUrl, loginPath } from "../lib/auth-routes";
 const navigation = [
   { href: "/dashboard", label: "Overview", icon: LayoutDashboard, exact: true },
   { href: "/dashboard/knowledge-base", label: "Knowledge bases", icon: FolderOpen },
-  { href: "/dashboard/public-knowledge-bases", label: "Public directory", icon: Globe2 },
+  { href: "/dashboard/public-knowledge-bases", label: "Global directory", icon: Globe2 },
   { href: "/dashboard/observability", label: "Observability", icon: Activity },
   { href: "/dashboard/settings", label: "Settings", icon: Settings },
 ];
